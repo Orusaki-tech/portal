@@ -1,0 +1,67 @@
+[project]
+name = "realitysync"
+version = "0.1.0"
+description = "Geospatial boundary validation and data curation platform"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "rio-tiler~=6.0",
+    "rasterio~=1.4",
+    "scikit-image~=0.24",
+    "scikit-learn~=1.5",
+    "numpy~=1.26",
+    "shapely~=2.0",
+    "pystac-client~=0.8",
+    "httpx~=0.27",
+    "pydantic~=2.0",
+    "psycopg2-binary~=2.9",
+    "python-dotenv~=1.0",
+    "google-cloud-storage~=2.0",
+    "google-cloud-pubsub~=2.0",
+    "fastapi~=0.115",
+    "uvicorn~=0.32",
+    "titiler~=0.17",
+]
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+include = ["*"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest~=8.0",
+    "pytest-cov~=5.0",
+    "mypy~=1.11",
+    "ruff~=0.6",
+    "pre-commit~=3.8",
+    "ipykernel~=6.0",
+    "jupyter~=1.0",
+    "testcontainers[postgres]~=4.0",
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+warn_unused_ignores = true
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+markers = [
+    "integration: marks tests that require PostGIS (deselect with '-m \"not integration\"')",
+    "e2e: marks end-to-end tests (deselect with '-m \"not e2e\"')",
+]
+
+[tool.coverage.run]
+source = ["backend"]
+omit = ["*/tests/*", "*/migrations/*"]
+
+[tool.coverage.report]
+fail_under = 90

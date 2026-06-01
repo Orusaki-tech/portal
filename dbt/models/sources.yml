@@ -1,0 +1,17 @@
+version: 2
+
+sources:
+  - name: postgres
+    schema: public
+    tables:
+      - name: ml_polygons
+      - name: edge_metrics
+      - name: human_corrections
+      - name: initiatives
+      - name: validation_runs
+      - name: map_task_grid
+      - name: initiative_participants
+      - name: credit_transactions
+      - name: export_jobs
+      - name: marketplace_listings
+      - name: dataset_purchases
