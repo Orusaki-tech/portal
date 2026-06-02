@@ -1,0 +1,35 @@
+{
+  "name": "RealitySync",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "postCreateCommand": "pip install -r backend/requirements-core.txt && cd frontend && npm install",
+  "forwardPorts": [8000, 3000, 5432],
+  "portsAttributes": {
+    "8000": { "label": "API", "onAutoForward": "notify" },
+    "3000": { "label": "Frontend", "onAutoForward": "openBrowser" },
+    "5432": { "label": "PostGIS", "onAutoForward": "silent" }
+  },
+  "remoteEnv": {
+    "DB_HOST": "localhost",
+    "DB_PORT": "5432",
+    "DB_NAME": "realitysync",
+    "DB_USER": "realitysync",
+    "DB_PASSWORD": "realitysync",
+    "NEXT_PUBLIC_API_URL": "http://localhost:8000"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.mypy-type-checker",
+        "charliermarsh.ruff",
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-pg",
+        "bradlc.vscode-tailwindcss"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      }
+    }
+  }
+}

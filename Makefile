@@ -37,6 +37,11 @@ db-reset:
 	$(MAKE) migrate
 
 # Testing & linting
+dev:
+	@echo "Starting API on :8000 and Frontend on :3000..."
+	@trap 'kill 0' EXIT; \
+		uvicorn backend.engine.entrypoints.api:app --reload --host 0.0.0.0 --port 8000 & \
+		cd frontend && npm run dev
 test:
 	$(PYTHON) -m pytest -v
 
