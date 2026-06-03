@@ -4,7 +4,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 import psycopg2
@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def get_bus() -> MessageBus:
     uow = PostgresUnitOfWork(connection_factory=_db_conn_factory)
-    return bootstrap(uow=uow)
+    return bootstrap(uow=uow)  # type: ignore[arg-type]
 
 
 sentry_sdk.init(
@@ -111,7 +111,7 @@ def _resolve_user(api_key: str) -> UUID | None:
 
 
 @app.middleware("http")
-async def auth_middleware(request: Request, call_next):
+async def auth_middleware(request: Request, call_next: Any) -> Any:
     if any(
         request.url.path.startswith(p)
         for p in ("/health", "/docs", "/openapi", "/tiles", "/api/auth")
@@ -284,7 +284,7 @@ class ScoreHackathonSubmissionRequest(BaseModel):
 
 
 @app.get("/health")
-async def health() -> dict:
+async def health() -> Any:
     """Health check endpoint."""
     return {"status": "ok"}
 
@@ -304,7 +304,7 @@ class RegisterRequest(BaseModel):
 
 
 @app.post("/api/auth/login")
-async def login(body: LoginRequest) -> dict:
+async def login(body: LoginRequest) -> Any:
     """Return the user's API key for the given email."""
     conn = _db_conn_factory()
     try:
@@ -331,7 +331,7 @@ async def login(body: LoginRequest) -> dict:
 async def list_imagery(
     request: Request,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """List the current user's uploaded imagery."""
     user_id = getattr(request.state, "user_id", None)
     if user_id is None:
@@ -372,7 +372,7 @@ async def list_imagery(
 
 
 @app.post("/api/auth/register")
-async def register(body: RegisterRequest) -> dict:
+async def register(body: RegisterRequest) -> Any:
     """Create a new user and return an API key."""
     import secrets
 
@@ -401,7 +401,7 @@ async def register(body: RegisterRequest) -> dict:
 async def upload_dataset(
     body: UploadPolygonSetRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Upload a set of polygons for ML-based validation."""
     try:
         results = bus.handle(
@@ -421,7 +421,7 @@ async def upload_dataset(
 async def validate_polygon(
     body: ValidatePolygonRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Run edge validation on a single polygon."""
     try:
         results = bus.handle(
@@ -446,7 +446,7 @@ async def validate_polygon(
 async def correct_boundary(
     body: CorrectBoundaryRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Submit a human correction for a polygon boundary."""
     try:
         results = bus.handle(
@@ -471,7 +471,7 @@ async def correct_boundary(
 async def create_initiative(
     body: CreateInitiativeRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Create a new annotation initiative."""
     try:
         results = bus.handle(
@@ -495,7 +495,7 @@ async def list_initiatives(
     status: str | None = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-) -> dict:
+) -> Any:
     """List all initiatives with optional owner/status filters."""
     with bus.uow as uow:
         items = uow.initiative_repo.list(owner_id=owner_id, status=status)
@@ -525,7 +525,7 @@ async def list_initiatives(
 async def get_initiative(
     initiative_id: UUID,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Get details for a single initiative."""
     with bus.uow as uow:
         initiative = uow.initiative_repo.get(initiative_id)
@@ -563,7 +563,7 @@ async def archive_initiative(
 async def list_initiative_grids(
     initiative_id: UUID,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """List grid blocks belonging to an initiative."""
     with bus.uow as uow:
         grids = uow.grid_repo.get_by_initiative(initiative_id)
@@ -587,7 +587,7 @@ async def update_initiative(
     initiative_id: UUID,
     body: UpdateInitiativeRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Update initiative fields (name, status, hackathon mode, etc.)."""
     with bus.uow as uow:
         initiative = uow.initiative_repo.get(initiative_id)
@@ -623,7 +623,7 @@ async def update_initiative(
 async def join_hackathon(
     body: JoinHackathonRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Join a hackathon initiative."""
     try:
         bus.handle(JoinHackathon(initiative_id=body.initiative_id, user_id=body.user_id))
@@ -636,7 +636,7 @@ async def join_hackathon(
 async def submit_hackathon_result(
     body: SubmitHackathonResultRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Submit a score result for a hackathon participant."""
     try:
         bus.handle(
@@ -656,7 +656,7 @@ async def submit_hackathon_result(
 async def score_hackathon_submission(
     body: ScoreHackathonSubmissionRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Score/update a specific hackathon submission."""
     try:
         bus.handle(
@@ -675,7 +675,7 @@ async def score_hackathon_submission(
 async def get_leaderboard(
     initiative_id: UUID,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Get the leaderboard for a hackathon initiative."""
     with bus.uow as uow:
         entries = uow.leaderboard_repo.list_by_initiative(initiative_id)
@@ -705,7 +705,7 @@ async def get_leaderboard(
 async def list_polygons(
     body: ListPolygonsRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """List polygons with optional filtering and pagination."""
     with bus.uow as uow:
         conn = uow.conn if hasattr(uow, "conn") else None
@@ -714,7 +714,7 @@ async def list_polygons(
 
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             conditions = ["1=1"]
-            params: list = []
+            params: list[Any] = []
             if body.initiative_id:
                 conditions.append("g.initiative_id = %s")
                 params.append(body.initiative_id)
@@ -758,7 +758,7 @@ async def list_polygons(
 async def get_polygon(
     polygon_id: UUID,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Get polygon detail with edge metrics and correction history."""
     with bus.uow as uow:
         conn = uow.conn if hasattr(uow, "conn") else None
@@ -837,7 +837,7 @@ async def get_triage(
     priority_tier: str | None = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-) -> dict:
+) -> Any:
     """Get the triage queue of polygons needing review."""
     with bus.uow as uow:
         conn = uow.conn if hasattr(uow, "conn") else None
@@ -846,7 +846,7 @@ async def get_triage(
 
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             conditions = ["1=1"]
-            params: list = []
+            params: list[Any] = []
             if initiative_id:
                 conditions.append("g.initiative_id = %s")
                 params.append(initiative_id)
@@ -922,7 +922,7 @@ async def get_triage(
 async def top_up_credits(
     body: TopUpCreditsRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Add credits to a user's account."""
     try:
         results = bus.handle(
@@ -941,7 +941,7 @@ async def get_credits(
     user_id: UUID,
     request: Request,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Fetch a user's current credit balance. Only the authenticated user can view their own balance."""  # noqa: E501
     authed_user = getattr(request.state, "user_id", None)
     if authed_user is None or authed_user != user_id:
@@ -965,7 +965,7 @@ async def get_credits(
 async def request_export(
     body: RequestExportRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Request an export job for a dataset."""
     try:
         results = bus.handle(
@@ -995,7 +995,7 @@ async def request_export(
 async def generate_grids(
     body: GenerateGridBlocksRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Generate grid blocks for an initiative."""
     try:
         results = bus.handle(
@@ -1017,7 +1017,7 @@ async def generate_grids(
 async def assign_participant(
     body: AssignParticipantRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Assign a participant to an initiative."""
     try:
         results = bus.handle(
@@ -1036,7 +1036,7 @@ async def assign_participant(
 async def lock_grid_block(
     body: LockGridBlockRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Lock a grid block for a user to work on."""
     try:
         results = bus.handle(
@@ -1054,7 +1054,7 @@ async def lock_grid_block(
 async def claim_grid_block(
     body: ClaimGridBlockRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Claim the next available grid block in an initiative."""
     try:
         results = bus.handle(
@@ -1072,7 +1072,7 @@ async def claim_grid_block(
 async def submit_grid_block(
     body: SubmitGridBlockRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Submit a grid block for review."""
     try:
         results = bus.handle(SubmitGridBlock(grid_id=body.grid_id))
@@ -1085,7 +1085,7 @@ async def submit_grid_block(
 async def approve_grid_block(
     body: ApproveGridBlockRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Approve a grid block (reviewer action)."""
     try:
         results = bus.handle(ApproveGridBlock(grid_id=body.grid_id, reviewer_id=body.reviewer_id))
@@ -1098,7 +1098,7 @@ async def approve_grid_block(
 async def dispute_grid_block(
     body: DisputeGridBlockRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Dispute a grid block (send back for rework)."""
     try:
         results = bus.handle(
@@ -1113,7 +1113,7 @@ async def dispute_grid_block(
 async def bulk_assign_grids(
     body: BulkAssignGridBlocksRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Bulk assign grid blocks to a user (admin)."""
     try:
         results = bus.handle(BulkAssignGridBlocks(grid_ids=body.grid_ids, user_id=body.user_id))
@@ -1132,7 +1132,7 @@ async def list_marketplace(
     bus: Annotated[MessageBus, Depends(get_bus)],
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-) -> dict:
+) -> Any:
     """List active marketplace dataset listings."""
     with bus.uow as uow:
         listings = uow.marketplace_repo.list_active()
@@ -1165,7 +1165,7 @@ async def list_marketplace(
 async def create_listing(
     body: ListDatasetForSaleRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """List a dataset for sale on the marketplace."""
     try:
         results = bus.handle(
@@ -1187,7 +1187,7 @@ async def create_listing(
 async def purchase_dataset(
     body: PurchaseDatasetRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-) -> dict:
+) -> Any:
     """Purchase a dataset listing."""
     try:
         results = bus.handle(

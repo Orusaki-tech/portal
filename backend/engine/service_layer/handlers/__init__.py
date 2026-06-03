@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from backend.engine.adapters.email_sender import ConsoleEmailSender, EmailSender
 
@@ -89,19 +90,19 @@ def set_email_sender(sender: EmailSender) -> None:
     _email_sender = sender
 
 
-def handle_grid_locked(event, uow) -> None:
+def handle_grid_locked(event: Any, uow: Any) -> None:
     logger.info(f"Grid {event.grid_id} locked by user {event.user_id}")
 
 
-def handle_grid_submitted(event, uow) -> None:
+def handle_grid_submitted(event: Any, uow: Any) -> None:
     logger.info(f"Grid {event.grid_id} submitted by user {event.user_id}")
 
 
-def handle_grid_disputed(event, uow) -> None:
+def handle_grid_disputed(event: Any, uow: Any) -> None:
     logger.info(f"Grid {event.grid_id} disputed by reviewer {event.reviewer_id}: {event.notes}")
 
 
-def handle_initiative_completed_notification(event, uow) -> None:
+def handle_initiative_completed_notification(event: Any, uow: Any) -> None:
     owner = uow.user_repo.get(event.owner_id)
     if owner is None:
         logger.warning(f"Owner {event.owner_id} not found for notification")
@@ -116,7 +117,7 @@ def handle_initiative_completed_notification(event, uow) -> None:
     )
 
 
-def handle_dataset_purchased_notification(event, uow) -> None:
+def handle_dataset_purchased_notification(event: Any, uow: Any) -> None:
     buyer = uow.user_repo.get(event.buyer_id)
     listing = (
         uow.marketplace_repo.get_listing(event.listing_id)
@@ -147,7 +148,7 @@ def handle_dataset_purchased_notification(event, uow) -> None:
         )
 
 
-def handle_hackathon_joined_notification(event, uow) -> None:
+def handle_hackathon_joined_notification(event: Any, uow: Any) -> None:
     participant = uow.user_repo.get(event.user_id)
     if participant is None:
         logger.warning(f"User {event.user_id} not found for notification")
@@ -162,7 +163,7 @@ def handle_hackathon_joined_notification(event, uow) -> None:
     )
 
 
-def handle_consensus_reached(event, uow) -> None:
+def handle_consensus_reached(event: Any, uow: Any) -> None:
     logger.info(
         f"Consensus reached for polygon {event.polygon_id} "
         f"from {event.annotation_count} annotations — "
@@ -170,7 +171,7 @@ def handle_consensus_reached(event, uow) -> None:
     )
 
 
-def handle_hackathon_score_updated(event, uow) -> None:
+def handle_hackathon_score_updated(event: Any, uow: Any) -> None:
     entries = uow.leaderboard_repo.list_by_initiative(event.initiative_id)
     entries.sort(key=lambda e: e.score, reverse=True)
     for i, entry in enumerate(entries):

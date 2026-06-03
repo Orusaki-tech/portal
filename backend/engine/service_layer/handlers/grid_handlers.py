@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 from pyproj import Transformer
@@ -25,13 +26,13 @@ from backend.engine.domain.events import (
     GridBlockSubmitted,
     InitiativeCompleted,
 )
-from backend.engine.domain.models import TaskGrid
+from backend.engine.domain.models import GridStatus, InitiativeStatus, TaskGrid
 from backend.engine.service_layer.unit_of_work import UnitOfWork
 
 logger = logging.getLogger(__name__)
 
 
-def handle_lock_grid_block(cmd: LockGridBlock, uow: UnitOfWork) -> dict:
+def handle_lock_grid_block(cmd: LockGridBlock, uow: UnitOfWork) -> dict[str, Any]:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is None:
         raise ValueError(f"Grid {cmd.grid_id} not found")
@@ -46,7 +47,7 @@ def handle_lock_grid_block(cmd: LockGridBlock, uow: UnitOfWork) -> dict:
     }
 
 
-def handle_claim_grid_block(cmd: ClaimGridBlock, uow: UnitOfWork) -> dict:
+def handle_claim_grid_block(cmd: ClaimGridBlock, uow: UnitOfWork) -> dict[str, Any]:
     grids = uow.grid_repo.get_by_initiative(cmd.initiative_id)
     available = [g for g in grids if g.status.value == "pending"]
     if not available:
@@ -63,7 +64,7 @@ def handle_claim_grid_block(cmd: ClaimGridBlock, uow: UnitOfWork) -> dict:
     }
 
 
-def handle_submit_grid_block(cmd: SubmitGridBlock, uow: UnitOfWork) -> dict:
+def handle_submit_grid_block(cmd: SubmitGridBlock, uow: UnitOfWork) -> dict[str, Any]:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is None:
         raise ValueError(f"Grid {cmd.grid_id} not found")
@@ -77,7 +78,7 @@ def handle_submit_grid_block(cmd: SubmitGridBlock, uow: UnitOfWork) -> dict:
     }
 
 
-def handle_approve_grid_block(cmd: ApproveGridBlock, uow: UnitOfWork) -> dict:
+def handle_approve_grid_block(cmd: ApproveGridBlock, uow: UnitOfWork) -> dict[str, Any]:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is None:
         raise ValueError(f"Grid {cmd.grid_id} not found")
@@ -96,7 +97,7 @@ def handle_approve_grid_block(cmd: ApproveGridBlock, uow: UnitOfWork) -> dict:
     }
 
 
-def handle_dispute_grid_block(cmd: DisputeGridBlock, uow: UnitOfWork) -> dict:
+def handle_dispute_grid_block(cmd: DisputeGridBlock, uow: UnitOfWork) -> dict[str, Any]:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is None:
         raise ValueError(f"Grid {cmd.grid_id} not found")
@@ -118,7 +119,7 @@ def handle_dispute_grid_block(cmd: DisputeGridBlock, uow: UnitOfWork) -> dict:
     }
 
 
-def handle_bulk_assign_grid_blocks(cmd: BulkAssignGridBlocks, uow: UnitOfWork) -> dict:
+def handle_bulk_assign_grid_blocks(cmd: BulkAssignGridBlocks, uow: UnitOfWork) -> dict[str, Any]:
     assigned = 0
     for grid_id in cmd.grid_ids:
         grid = uow.grid_repo.get(grid_id)
@@ -134,7 +135,7 @@ def handle_bulk_assign_grid_blocks(cmd: BulkAssignGridBlocks, uow: UnitOfWork) -
     }
 
 
-def handle_generate_grid_blocks(cmd: GenerateGridBlocks, uow: UnitOfWork) -> dict:
+def handle_generate_grid_blocks(cmd: GenerateGridBlocks, uow: UnitOfWork) -> dict[str, Any]:
     initiative = uow.initiative_repo.get(cmd.initiative_id)
     if initiative is None:
         raise ValueError(f"Initiative {cmd.initiative_id} not found")
@@ -198,12 +199,12 @@ def handle_check_initiative_complete(event: GridBlockCompleted, uow: UnitOfWork)
         logger.warning(f"Initiative {event.initiative_id} not found")
         return
     grids = uow.grid_repo.get_by_initiative(event.initiative_id)
-    all_complete = all(g.status == "completed" for g in grids)
-    if all_complete and initiative.status != "completed":
+    all_complete = all(g.status == GridStatus.COMPLETE for g in grids)
+    if all_complete and initiative.status != InitiativeStatus.COMPLETE:
         initiative.complete()
         initiative.raise_event(
             InitiativeCompleted(
-                initiative_id=initiative.initiative_id,
+                initiative_id=initiative.id,
                 owner_id=initiative.owner_id,
             )
         )

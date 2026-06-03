@@ -31,11 +31,11 @@ try:
             api_key = os.getenv("SENDGRID_API_KEY")
             if not api_key:
                 logger.warning("SENDGRID_API_KEY not set — falling back to ConsoleEmailSender")
-                self._fallback = ConsoleEmailSender()
+                self._fallback: EmailSender = ConsoleEmailSender()
                 self._client = None
             else:
                 self._client = sendgrid.SendGridAPIClient(api_key=api_key)
-                self._fallback = None
+                self._fallback = ConsoleEmailSender()
 
         def send(self, to: str, subject: str, body: str) -> None:
             if self._client is None:
@@ -56,7 +56,7 @@ try:
 
 except ImportError:
     logger.info("sendgrid package not installed — using ConsoleEmailSender as fallback")
-    SendGridEmailSender = None
+    SendGridEmailSender = None  # type: ignore[assignment,misc]
 
 
 def get_email_sender() -> EmailSender:

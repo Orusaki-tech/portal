@@ -12,7 +12,7 @@ from backend.engine.service_layer.unit_of_work import UnitOfWork
 logger = logging.getLogger(__name__)
 
 Message = Command | Event
-Handler = Callable[[Message, UnitOfWork], Any]
+Handler = Callable[..., Any]
 
 
 class MessageBus:
@@ -26,7 +26,7 @@ class MessageBus:
         self.command_handlers = command_handlers
         self.event_handlers = event_handlers
 
-    def handle(self, message: Message) -> list:
+    def handle(self, message: Message) -> list[Any]:
         results = []
         queue: deque[Message] = deque([message])
         while queue:

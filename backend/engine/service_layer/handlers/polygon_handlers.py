@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 from backend.engine.domain.commands import CorrectBoundary, UploadPolygonSet, ValidatePolygon
@@ -24,7 +25,7 @@ from backend.engine.service_layer.unit_of_work import UnitOfWork
 logger = logging.getLogger(__name__)
 
 
-def handle_validate_polygon(cmd: ValidatePolygon, uow: UnitOfWork) -> dict:
+def handle_validate_polygon(cmd: ValidatePolygon, uow: UnitOfWork) -> dict[str, Any]:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is None:
         raise ValueError(f"Grid {cmd.grid_id} not found")
@@ -77,7 +78,7 @@ def handle_validate_polygon(cmd: ValidatePolygon, uow: UnitOfWork) -> dict:
     }
 
 
-def handle_upload_polygon_set(cmd: UploadPolygonSet, uow: UnitOfWork) -> dict:
+def handle_upload_polygon_set(cmd: UploadPolygonSet, uow: UnitOfWork) -> dict[str, Any]:
     user = uow.user_repo.get(cmd.user_id)
     if user is None:
         raise ValueError(f"User {cmd.user_id} not found")
@@ -125,7 +126,7 @@ def handle_upload_polygon_set(cmd: UploadPolygonSet, uow: UnitOfWork) -> dict:
     }
 
 
-def handle_correct_boundary(cmd: CorrectBoundary, uow: UnitOfWork) -> dict:
+def handle_correct_boundary(cmd: CorrectBoundary, uow: UnitOfWork) -> dict[str, Any]:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is not None:
         polygon = next((p for p in grid.polygons if p.id == cmd.polygon_id), None)
@@ -148,13 +149,14 @@ def handle_correct_boundary(cmd: CorrectBoundary, uow: UnitOfWork) -> dict:
     )
     uow.correction_repo.add(correction)
 
-    grid.raise_event(
-        BoundaryCorrected(
-            polygon_id=cmd.polygon_id,
-            user_id=cmd.user_id,
-            new_geometry=cmd.new_geometry,
+    if grid is not None:
+        grid.raise_event(
+            BoundaryCorrected(
+                polygon_id=cmd.polygon_id,
+                user_id=cmd.user_id,
+                new_geometry=cmd.new_geometry,
+            )
         )
-    )
 
     corrections = uow.correction_repo.get_by_polygon(cmd.polygon_id)
     if len(corrections) >= 2:
@@ -165,13 +167,14 @@ def handle_correct_boundary(cmd: CorrectBoundary, uow: UnitOfWork) -> dict:
         polygon.correct(merged)
         polygon.qa_status = QaStatus.VALIDATED
         polygon.confidence_avg = 0.95
-        grid.raise_event(
-            ConsensusReached(
-                polygon_id=cmd.polygon_id,
-                merged_geometry=merged,
-                annotation_count=len(corrections),
+        if grid is not None:
+            grid.raise_event(
+                ConsensusReached(
+                    polygon_id=cmd.polygon_id,
+                    merged_geometry=merged,
+                    annotation_count=len(corrections),
+                )
             )
-        )
 
     return {
         "polygon_id": str(cmd.polygon_id),

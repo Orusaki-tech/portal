@@ -29,7 +29,7 @@ from backend.engine.domain.models import (
     ValidationRun,
 )
 
-psycopg2.extras.register_uuid()
+psycopg2.extras.register_uuid()  # type: ignore[no-untyped-call]
 
 
 class AbstractMlPolygonSetRepository(ABC):
@@ -353,7 +353,7 @@ class PostgresInitiativeRepository(AbstractInitiativeRepository):
     def list(self, owner_id: UUID | None = None, status: str | None = None) -> list[Initiative]:
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             conditions = []
-            params: list = []
+            params: list[Any] = []
             if owner_id:
                 conditions.append("owner_id = %s")
                 params.append(owner_id)
@@ -367,7 +367,7 @@ class PostgresInitiativeRepository(AbstractInitiativeRepository):
             )
             return [self._row_to_initiative(row) for row in cur.fetchall()]
 
-    def _row_to_initiative(self, row: dict) -> Initiative:
+    def _row_to_initiative(self, row: dict[str, Any]) -> Initiative:
         return Initiative(
             id=row["id"],
             owner_id=row["owner_id"],
@@ -466,7 +466,7 @@ class PostgresExportRepository(AbstractExportRepository):
             )
             return [self._row_to_job(row) for row in cur.fetchall()]
 
-    def _row_to_job(self, row: dict) -> ExportJob:
+    def _row_to_job(self, row: dict[str, Any]) -> ExportJob:
         return ExportJob(
             export_id=row["export_id"],
             user_id=row["user_id"],
@@ -551,7 +551,7 @@ class PostgresMarketplaceRepository(AbstractMarketplaceRepository):
                 (status, listing_id),
             )
 
-    def _row_to_listing(self, row: dict) -> MarketplaceListing:
+    def _row_to_listing(self, row: dict[str, Any]) -> MarketplaceListing:
         return MarketplaceListing(
             listing_id=row["listing_id"],
             seller_id=row["seller_id"],
@@ -937,7 +937,7 @@ class PostgresValidationRunRepository(AbstractValidationRunRepository):
             return [self._row_to_run(r) for r in cur.fetchall()]
 
     @staticmethod
-    def _row_to_run(row: dict) -> ValidationRun:
+    def _row_to_run(row: dict[str, Any]) -> ValidationRun:
         return ValidationRun(
             id=row["id"],
             user_id=row["user_id"],
@@ -1013,10 +1013,11 @@ class PostgresCreditTransactionRepository(AbstractCreditTransactionRepository):
                 "SELECT COALESCE(SUM(amount), 0) FROM credit_transactions WHERE user_id = %s",
                 (user_id,),
             )
-            return Decimal(str(cur.fetchone()[0]))
+            row = cur.fetchone()
+            return Decimal(str(row[0] if row else 0))
 
     @staticmethod
-    def _row_to_txn(row: dict) -> CreditTransaction:
+    def _row_to_txn(row: dict[str, Any]) -> CreditTransaction:
         return CreditTransaction(
             id=row["id"],
             user_id=row["user_id"],

@@ -6,6 +6,7 @@ from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
+# mypy: disable-error-code=type-arg
 from shapely import wkt
 
 from backend.engine.domain.events import (

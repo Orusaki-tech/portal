@@ -47,7 +47,10 @@ class UnitOfWork(Protocol):
     def __exit__(self, *args: Any) -> None: ...
     def commit(self) -> None: ...
     def rollback(self) -> None: ...
-    def collect_events(self) -> list: ...
+    def collect_events(self) -> list[Any]: ...
+
+    @property
+    def events(self) -> list[Any]: ...
 
 
 class FakeUnitOfWork:
@@ -92,7 +95,7 @@ class FakeUnitOfWork:
         self.validation_run_repo = validation_run_repo or FakeValidationRunRepository()
         self.committed = False
         self.rolled_back = False
-        self._events: list = []
+        self._events: list[Any] = []
 
     def __enter__(self) -> FakeUnitOfWork:
         return self
@@ -107,21 +110,22 @@ class FakeUnitOfWork:
     def rollback(self) -> None:
         self.rolled_back = True
 
-    def collect_events(self) -> list:
-        events = []
-        for grid in self.grid_repo._grids.values():
+    def collect_events(self) -> list[Any]:
+        events: list[Any] = []
+        for grid in self.grid_repo._grids.values():  # type: ignore[attr-defined]
             events.extend(grid.events)
             grid.clear_events()
-        for user in self.user_repo._users.values():
+        for user in self.user_repo._users.values():  # type: ignore[attr-defined]
             events.extend(user.events)
             user.clear_events()
-        for entry in self.leaderboard_repo._entries.values():
+        for entry in self.leaderboard_repo._entries.values():  # type: ignore[attr-defined]
             events.extend(entry.events)
             entry.clear_events()
         return events
 
     @property
-    def events(self) -> list:
+    @property
+    def events(self) -> list[Any]:
         return self._events
 
 
@@ -140,7 +144,7 @@ class PostgresUnitOfWork:
         self.leaderboard_repo: PostgresLeaderboardRepository | None = None
         self.credit_txn_repo: PostgresCreditTransactionRepository | None = None
         self.validation_run_repo: PostgresValidationRunRepository | None = None
-        self._events: list = []
+        self._events: list[Any] = []
 
     def __enter__(self) -> PostgresUnitOfWork:
         self.conn = self._conn_factory()
@@ -173,8 +177,8 @@ class PostgresUnitOfWork:
         if self.conn:
             self.conn.rollback()
 
-    def collect_events(self) -> list:
-        events: list = []
+    def collect_events(self) -> list[Any]:
+        events: list[Any] = []
         if self.grid_repo:
             for grid in self.grid_repo.seen.values():
                 events.extend(grid.events)
@@ -190,5 +194,6 @@ class PostgresUnitOfWork:
         return events
 
     @property
-    def events(self) -> list:
+    @property
+    def events(self) -> list[Any]:
         return self._events

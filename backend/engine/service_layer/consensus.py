@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from statistics import median
+from typing import cast
 from uuid import UUID
 
 from shapely import Polygon, wkt
@@ -63,7 +64,7 @@ def _merge_two(wkt_a: str, wkt_b: str) -> str:
         for i in range(n)
     ]
     median_coords.append(median_coords[0])
-    return Polygon(median_coords).wkt
+    return cast(str, Polygon(median_coords).wkt)
 
 
 def _merge_many(wkts: list[str]) -> str:
@@ -79,4 +80,4 @@ def _merge_many(wkts: list[str]) -> str:
         merged_coords.append((median(xs), median(ys)))
 
     merged_coords.append(merged_coords[0])
-    return Polygon(merged_coords).wkt
+    return cast(str, Polygon(merged_coords).wkt)

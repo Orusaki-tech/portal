@@ -41,7 +41,7 @@ except ImportError:
 
 
 def _convert_to_geojson(
-    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+    cur: Any, source_type: str, source_id: UUID, export_params: dict[str, Any] | None = None
 ) -> str:
     if source_type == "grid":
         cur.execute(
@@ -67,7 +67,7 @@ def _convert_to_geojson(
     for row in cur.fetchall():
         wkt = row[3] or row[2]
         coords = _wkt_to_geojson_coords(wkt)
-        feat = {
+        feat: dict[str, Any] = {
             "type": "Feature",
             "id": str(row[0]),
             "geometry": {"type": "Polygon", "coordinates": [coords]},
@@ -101,7 +101,7 @@ def _wkt_to_geojson_coords(wkt_str: str) -> list[list[float]]:
 
 
 def _convert_to_coco(
-    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+    cur: Any, source_type: str, source_id: UUID, export_params: dict[str, Any] | None = None
 ) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     images: list[dict[str, Any]] = []
@@ -153,7 +153,7 @@ def _convert_to_coco(
 
 
 def _convert_to_yolo(
-    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+    cur: Any, source_type: str, source_id: UUID, export_params: dict[str, Any] | None = None
 ) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     all_coords = []
@@ -184,7 +184,7 @@ def _convert_to_yolo(
 
 
 def _convert_to_pascal_voc(
-    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+    cur: Any, source_type: str, source_id: UUID, export_params: dict[str, Any] | None = None
 ) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     parts: list[str] = ["<annotation>"]
@@ -198,7 +198,7 @@ def _convert_to_pascal_voc(
 
 
 def _convert_to_parquet(
-    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+    cur: Any, source_type: str, source_id: UUID, export_params: dict[str, Any] | None = None
 ) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     rows: list[dict[str, Any]] = []
@@ -220,7 +220,7 @@ def _convert_to_parquet(
 
 
 def _convert_to_geopackage(
-    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+    cur: Any, source_type: str, source_id: UUID, export_params: dict[str, Any] | None = None
 ) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     features = geojson.get("features", [])
@@ -251,7 +251,7 @@ def _convert_to_geopackage(
 
 
 def _convert_to_tfrecord(
-    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+    cur: Any, source_type: str, source_id: UUID, export_params: dict[str, Any] | None = None
 ) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     if not HAS_TFRECORD:
@@ -297,7 +297,7 @@ class ExportWorker:
     and upload the result to cloud storage.  For MVP it creates a placeholder URL.
     """
 
-    def __init__(self, connection_factory: object) -> None:
+    def __init__(self, connection_factory: Any) -> None:
         self._factory = connection_factory
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -359,7 +359,7 @@ class ExportWorker:
     def _complete_job(
         self,
         repo: PostgresExportRepository,
-        cur: object,
+        cur: Any,
         job: ExportJob,
     ) -> None:
         ext, converter = FORMAT_CONVERTERS.get(job.export_format, ("bin", None))

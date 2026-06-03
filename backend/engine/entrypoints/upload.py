@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg2
@@ -12,7 +13,7 @@ from pydantic import BaseModel
 try:
     import google.cloud.storage as storage
 except ImportError:
-    storage = None  # type: ignore[assignment]
+    storage = None
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ async def generate_upload_url(
 
 
 @router.post("/callback")
-async def upload_callback(body: UploadCallbackRequest) -> dict:
+async def upload_callback(body: UploadCallbackRequest) -> dict[str, Any]:
     gcs_uri = f"gs://{_BUCKET}/{body.object_path}"
 
     if storage is not None:
@@ -104,7 +105,7 @@ async def upload_callback(body: UploadCallbackRequest) -> dict:
 async def upload_local(
     file: UploadFile,
     user_id: UUID,
-) -> dict:
+) -> dict[str, Any]:
     """Direct file upload for local development — saves file to LOCAL_UPLOAD_DIR and serves tiles."""
     _LOCAL_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     stem = f"{uuid4()}"

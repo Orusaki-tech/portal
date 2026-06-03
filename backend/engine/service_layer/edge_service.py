@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import Any
 
 from shapely import wkt
 from shapely.geometry import Polygon, shape
@@ -64,7 +65,7 @@ def validate_polygon(
     geometry: str,
     imagery_source: str = "naip",
     imagery_priority: list[str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     sources = imagery_priority or [imagery_source]
     last_error: str | None = None
 
@@ -89,7 +90,7 @@ def validate_polygon(
     }
 
 
-def _run_pipeline(geometry: str, imagery_source: str) -> dict:
+def _run_pipeline(geometry: str, imagery_source: str) -> dict[str, Any]:
     poly_shape = shape({"type": "Polygon", "coordinates": [_wkt_to_coords(geometry)]})
 
     from backend.edge_engine.stac_client import find_best_imagery_for_polygon
@@ -147,7 +148,7 @@ def _run_pipeline(geometry: str, imagery_source: str) -> dict:
 
 
 def _extract_buffer(
-    polygon_geometry: dict, cog_url: str, buffer_meters: float = 2.0
+    polygon_geometry: dict[str, Any], cog_url: str, buffer_meters: float = 2.0
 ) -> tuple[np.ndarray, object]:
     poly = shape(polygon_geometry)
     buffered = poly.buffer(buffer_meters)
@@ -161,7 +162,7 @@ def _extract_buffer(
     return img.data, img.transform
 
 
-def _extract_vertices(polygon_geometry: dict) -> np.ndarray:
+def _extract_vertices(polygon_geometry: dict[str, Any]) -> np.ndarray:
     poly = shape(polygon_geometry)
     coords = list(poly.exterior.coords)
     return np.array(coords)

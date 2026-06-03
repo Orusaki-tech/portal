@@ -1,11 +1,12 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class PolygonInput(BaseModel):
     polygon_id: str
-    geometry: dict  # GeoJSON geometry
+    geometry: dict[str, Any]  # GeoJSON geometry
     buffer_meters: float = 2.0
 
 
@@ -36,5 +37,5 @@ class STACQuery(BaseModel):
 class ValidationRunRequest(BaseModel):
     polygon_set_id: str
     imagery_id: str | None = None
-    region: dict | None = None
+    region: dict[str, Any] | None = None
     confidence_threshold: float = 0.7

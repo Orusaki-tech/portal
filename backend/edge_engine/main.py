@@ -16,6 +16,7 @@ import json
 import os
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import numpy as np
@@ -39,7 +40,7 @@ DBT_API_KEY = os.getenv("DBT_API_KEY", "")
 
 def extract_buffer_around_polygon(
     cog_url: str,
-    polygon_geometry: dict,
+    polygon_geometry: dict[str, Any],
     buffer_meters: float = 2.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -56,7 +57,7 @@ def extract_buffer_around_polygon(
     return img.data, img.transform
 
 
-def extract_boundary_vertices(polygon_geometry: dict) -> np.ndarray:
+def extract_boundary_vertices(polygon_geometry: dict[str, Any]) -> np.ndarray:
     """Extract the ML-predicted boundary as a numpy array of (x, y) vertices."""
     poly = shape(polygon_geometry)
     coords = list(poly.exterior.coords)
@@ -65,7 +66,7 @@ def extract_boundary_vertices(polygon_geometry: dict) -> np.ndarray:
 
 def process_single_polygon(
     polygon_id: str,
-    geometry: dict,
+    geometry: dict[str, Any],
     run_id: str,
     buffer_meters: float = 2.0,
     confidence_threshold: float = 0.7,
@@ -160,7 +161,7 @@ def process_single_polygon(
     )
 
 
-def write_results_to_db(results: list[EdgeResult], db_dsn: str):
+def write_results_to_db(results: list[EdgeResult], db_dsn: str) -> None:
     """Batch insert edge metrics into Cloud SQL."""
     import psycopg2
 
@@ -204,7 +205,7 @@ def write_results_to_db(results: list[EdgeResult], db_dsn: str):
     conn.close()
 
 
-def trigger_dbt_run():
+def trigger_dbt_run() -> None:
     """Trigger dbt Cloud job to refresh materialized models."""
     if not DBT_API_URL or not DBT_API_KEY:
         return
@@ -217,7 +218,7 @@ def trigger_dbt_run():
         )
 
 
-def main():
+def main() -> None:
 
     input_json = os.getenv("INPUT_POLYGONS", "[]")
     run_id = os.getenv("RUN_ID", str(uuid.uuid4()))

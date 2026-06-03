@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 from uuid import uuid4
 
 from backend.engine.domain.commands import TopUpCredits
@@ -10,7 +11,7 @@ from backend.engine.service_layer.unit_of_work import UnitOfWork
 logger = logging.getLogger(__name__)
 
 
-def handle_top_up_credits(cmd: TopUpCredits, uow: UnitOfWork) -> dict:
+def handle_top_up_credits(cmd: TopUpCredits, uow: UnitOfWork) -> dict[str, Any]:
     user = uow.user_repo.get(cmd.user_id)
     if user is None:
         raise ValueError(f"User {cmd.user_id} not found")

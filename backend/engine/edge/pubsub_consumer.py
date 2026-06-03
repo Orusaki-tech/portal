@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ except ImportError:
     logger.warning("google.cloud.storage not available — GCS operations disabled")
 
 
-def process_validation_message(message: dict) -> None:
+def process_validation_message(message: dict[str, Any]) -> None:
     polygon_id = message.get("polygon_id")
     run_id = message.get("run_id")
     results_url = message.get("results_url")
@@ -33,7 +34,7 @@ def process_validation_message(message: dict) -> None:
     )
 
 
-def process_export_message(message: dict) -> None:
+def process_export_message(message: dict[str, Any]) -> None:
     export_id = message.get("export_id")
     user_id = message.get("user_id")
     export_format = message.get("export_format")
@@ -50,7 +51,7 @@ def process_export_message(message: dict) -> None:
     )
 
 
-def process_imagery_upload_message(message: dict) -> None:
+def process_imagery_upload_message(message: dict[str, Any]) -> None:
     bucket_name = message.get("bucket", LANDING_BUCKET)
     blob_name = message.get("name", "")
 

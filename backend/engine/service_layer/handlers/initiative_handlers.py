@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 from uuid import uuid4
 
 from backend.engine.domain.commands import AssignParticipant, CreateInitiative
@@ -10,7 +11,7 @@ from backend.engine.service_layer.unit_of_work import UnitOfWork
 logger = logging.getLogger(__name__)
 
 
-def handle_create_initiative(cmd: CreateInitiative, uow: UnitOfWork) -> dict:
+def handle_create_initiative(cmd: CreateInitiative, uow: UnitOfWork) -> dict[str, Any]:
     initiative = Initiative(
         id=uuid4(),
         owner_id=cmd.owner_id,
@@ -27,7 +28,7 @@ def handle_create_initiative(cmd: CreateInitiative, uow: UnitOfWork) -> dict:
     }
 
 
-def handle_assign_participant(cmd: AssignParticipant, uow: UnitOfWork) -> dict:
+def handle_assign_participant(cmd: AssignParticipant, uow: UnitOfWork) -> dict[str, Any]:
     initiative = uow.initiative_repo.get(cmd.initiative_id)
     if initiative is None:
         raise ValueError(f"Initiative {cmd.initiative_id} not found")

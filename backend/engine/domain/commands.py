@@ -58,6 +58,7 @@ class ClaimGridBlock(Command):
 @dataclass(frozen=True)
 class SubmitGridBlock(Command):
     grid_id: UUID
+    user_id: UUID | None = None
 
 
 @dataclass(frozen=True)

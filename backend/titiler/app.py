@@ -46,7 +46,7 @@ COG_PATTERN = re.compile(r"^https?://storage\.googleapis\.com/([^/]+)/(.+\.tif)"
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
@@ -57,7 +57,7 @@ async def tile(
     y: int,
     url: str = Query(..., description="COG URL"),
     format: str = Query("webp", description="Output format: png, webp, jpg"),
-):
+) -> Response:
     """
     Serve a single map tile from a COG.
     URL points to either a public STAC-hosted COG (NAIP) or a user-uploaded COG in GCS.
@@ -122,5 +122,5 @@ async def tile(
 
 
 @app.on_event("startup")
-async def startup():
+async def startup() -> None:
     print("TiTiler server started. Ready to serve COG tiles.")

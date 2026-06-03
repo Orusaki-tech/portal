@@ -67,9 +67,9 @@ class GridBlockLocked(Event):
 @dataclass(frozen=True)
 class GridBlockSubmitted(Event):
     grid_id: UUID
-    user_id: UUID
+    user_id: UUID | None = None
 
-    def __init__(self, grid_id: UUID, user_id: UUID) -> None:
+    def __init__(self, grid_id: UUID, user_id: UUID | None = None) -> None:
         object.__setattr__(self, "event_id", uuid4())
         object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "grid_id", grid_id)

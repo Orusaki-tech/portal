@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Any
 
 import sentry_sdk
 from google.cloud import storage
@@ -33,28 +34,28 @@ sentry_sdk.init(
 storage_client = storage.Client()
 
 
-def download_from_gcs(bucket_name: str, blob_name: str, dest_path: str):
+def download_from_gcs(bucket_name: str, blob_name: str, dest_path: str) -> None:
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
     blob.download_to_filename(dest_path)
     print(f"Downloaded gs://{bucket_name}/{blob_name} → {dest_path}")
 
 
-def upload_to_gcs(bucket_name: str, source_path: str, dest_name: str):
+def upload_to_gcs(bucket_name: str, source_path: str, dest_name: str) -> None:
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(dest_name)
     blob.upload_from_filename(source_path)
     print(f"Uploaded {source_path} → gs://{bucket_name}/{dest_name}")
 
 
-def delete_from_gcs(bucket_name: str, blob_name: str):
+def delete_from_gcs(bucket_name: str, blob_name: str) -> None:
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
     blob.delete()
     print(f"Deleted gs://{bucket_name}/{blob_name}")
 
 
-def warp_to_web_mercator(input_path: str, output_path: str):
+def warp_to_web_mercator(input_path: str, output_path: str) -> None:
     cmd = [
         "gdalwarp",
         input_path,
@@ -72,7 +73,7 @@ def warp_to_web_mercator(input_path: str, output_path: str):
     print(f"Warped to EPSG:3857 → {output_path}")
 
 
-def translate_to_cog(input_path: str, output_path: str):
+def translate_to_cog(input_path: str, output_path: str) -> None:
     cmd = [
         "gdal_translate",
         input_path,
@@ -107,7 +108,7 @@ def extract_bbox(input_path: str) -> list[float]:
     return [ul[0], lr[1], lr[0], ul[1]]  # w, s, e, n
 
 
-def update_database(imagery_id: str, cog_uri: str, bbox: list[float], filename: str):
+def update_database(imagery_id: str, cog_uri: str, bbox: list[float], filename: str) -> None:
     """Record the processed COG metadata in Cloud SQL."""
     import psycopg2
 
@@ -157,10 +158,10 @@ def find_or_create_imagery_record(filename: str) -> str:
 
     cur.close()
     conn.close()
-    return imagery_id
+    return str(imagery_id)
 
 
-def process_event(event_data: dict):
+def process_event(event_data: dict[str, Any]) -> None:
     """Main processing function triggered by a Pub/Sub message."""
     bucket_name = event_data.get("bucket", LANDING_BUCKET)
     blob_name = event_data.get("name", "")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 from uuid import uuid4
 
 from backend.engine.domain.commands import ListDatasetForSale, PurchaseDataset
@@ -11,7 +12,7 @@ from backend.engine.service_layer.unit_of_work import UnitOfWork
 logger = logging.getLogger(__name__)
 
 
-def handle_list_dataset_for_sale(cmd: ListDatasetForSale, uow: UnitOfWork) -> dict:
+def handle_list_dataset_for_sale(cmd: ListDatasetForSale, uow: UnitOfWork) -> dict[str, Any]:
     seller = uow.user_repo.get(cmd.seller_id)
     if seller is None:
         raise ValueError(f"User {cmd.seller_id} not found")
@@ -23,7 +24,7 @@ def handle_list_dataset_for_sale(cmd: ListDatasetForSale, uow: UnitOfWork) -> di
     confidences = [p.confidence_avg for p in polygons if p.confidence_avg is not None]
     quality_score = (sum(confidences) / len(confidences)) if confidences else None
 
-    completed = [p for p in polygons if p.qa_status in (QaStatus.VALIDATED, QaStatus.REVIEWED)]
+    completed = [p for p in polygons if p.qa_status in (QaStatus.VALIDATED, QaStatus.CORRECTED)]
     completion_rate = (len(completed) / polygon_count) if polygon_count > 0 else None
 
     listing = MarketplaceListing(
@@ -48,7 +49,7 @@ def handle_list_dataset_for_sale(cmd: ListDatasetForSale, uow: UnitOfWork) -> di
     }
 
 
-def handle_purchase_dataset(cmd: PurchaseDataset, uow: UnitOfWork) -> dict:
+def handle_purchase_dataset(cmd: PurchaseDataset, uow: UnitOfWork) -> dict[str, Any]:
     listing = uow.marketplace_repo.get_listing(cmd.listing_id)
     if listing is None:
         raise ValueError(f"Listing {cmd.listing_id} not found")
