@@ -8,10 +8,12 @@ from backend.engine.domain.commands import (
     CorrectBoundary,
     CreateInitiative,
     GenerateGridBlocks,
+    JoinHackathon,
     ListDatasetForSale,
     LockGridBlock,
     PurchaseDataset,
     RequestExport,
+    SubmitHackathonResult,
     TopUpCredits,
     UploadPolygonSet,
     ValidatePolygon,
@@ -19,6 +21,7 @@ from backend.engine.domain.commands import (
 from backend.engine.domain.models import (
     GridStatus,
     Initiative,
+    InitiativeStatus,
     MarketplaceListing,
     Polygon,
     QaStatus,
@@ -28,7 +31,7 @@ from backend.engine.domain.models import (
 
 
 class TestValidatePolygon:
-    def test_validates_polygon(self) -> None:
+    def test_validates_square_polygon(self) -> None:
         bus = bootstrap()
         polygon_id = uuid4()
         grid_id = uuid4()
@@ -52,7 +55,31 @@ class TestValidatePolygon:
         )
 
         assert results[0]["polygon_id"] == str(polygon_id)
-        assert results[0]["status"] == "validated"
+        assert results[0]["status"] in ("validated", "low_confidence")
+        assert 0.0 <= results[0]["confidence"] <= 1.0
+
+    def test_validates_sliver_as_low_confidence(self) -> None:
+        bus = bootstrap()
+        polygon_id = uuid4()
+        grid_id = uuid4()
+        grid = TaskGrid(
+            id=grid_id, initiative_id=uuid4(),
+            geometry="POLYGON((0 0, 1 0, 1 0.001, 0 0.001, 0 0))",
+            polygons=[
+                Polygon(
+                    id=polygon_id, task_grid_id=grid_id, polygon_set_id=uuid4(),
+                    original_geometry="POLYGON((0 0, 1 0, 1 0.001, 0 0.001, 0 0))",
+                )
+            ],
+        )
+        bus.uow.grid_repo.add(grid)
+
+        results = bus.handle(
+            ValidatePolygon(grid_id=grid_id, polygon_id=polygon_id)
+        )
+
+        assert results[0]["status"] == "low_confidence"
+        assert results[0]["confidence"] < 0.70
 
     def test_grid_not_found_raises(self) -> None:
         bus = bootstrap()
@@ -136,6 +163,73 @@ class TestCorrectBoundary:
         assert results[0]["status"] == "corrected"
         assert grid.polygons[0].qa_status == QaStatus.CORRECTED
         assert grid.polygons[0].corrected_geometry == "POLYGON((0 0, 2 0, 2 1, 0 1, 0 0))"
+
+
+class TestConsensusTrigger:
+    def test_two_corrections_trigger_consensus(self) -> None:
+        bus = bootstrap()
+        polygon_id = uuid4()
+        grid_id = uuid4()
+        user_a = uuid4()
+        user_b = uuid4()
+        grid = TaskGrid(
+            id=grid_id, initiative_id=uuid4(),
+            geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            polygons=[
+                Polygon(
+                    id=polygon_id, task_grid_id=grid_id, polygon_set_id=uuid4(),
+                    original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+                )
+            ],
+        )
+        bus.uow.grid_repo.add(grid)
+
+        bus.handle(
+            CorrectBoundary(
+                grid_id=grid_id, polygon_id=polygon_id,
+                user_id=user_a,
+                new_geometry="POLYGON((0 0, 2 0, 2 1, 0 1, 0 0))",
+            )
+        )
+        bus.handle(
+            CorrectBoundary(
+                grid_id=grid_id, polygon_id=polygon_id,
+                user_id=user_b,
+                new_geometry="POLYGON((0 0, 2 0, 2 1, 0 1, 0 0))",
+            )
+        )
+
+        polygon = next(p for p in grid.polygons if p.id == polygon_id)
+        assert polygon.qa_status == QaStatus.VALIDATED
+        assert polygon.confidence_avg == 0.95
+
+    def test_single_correction_does_not_trigger_consensus(self) -> None:
+        bus = bootstrap()
+        polygon_id = uuid4()
+        grid_id = uuid4()
+        grid = TaskGrid(
+            id=grid_id, initiative_id=uuid4(),
+            geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            polygons=[
+                Polygon(
+                    id=polygon_id, task_grid_id=grid_id, polygon_set_id=uuid4(),
+                    original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+                )
+            ],
+        )
+        bus.uow.grid_repo.add(grid)
+
+        bus.handle(
+            CorrectBoundary(
+                grid_id=grid_id, polygon_id=polygon_id,
+                user_id=uuid4(),
+                new_geometry="POLYGON((0 0, 2 0, 2 1, 0 1, 0 0))",
+            )
+        )
+
+        polygon = next(p for p in grid.polygons if p.id == polygon_id)
+        assert polygon.qa_status == QaStatus.CORRECTED
+        assert polygon.confidence_avg is None
 
 
 class TestCreateInitiative:
@@ -421,3 +515,70 @@ class TestPurchaseDataset:
 
         with pytest.raises(ValueError, match="Insufficient credits"):
             bus.handle(PurchaseDataset(listing_id=listing.listing_id, buyer_id=buyer.id))
+
+
+class TestJoinHackathon:
+    def test_join_hackathon_creates_entry(self) -> None:
+        bus = bootstrap()
+        initiative_id = uuid4()
+        user_id = uuid4()
+        initiative = Initiative(
+            id=initiative_id, owner_id=user_id, name="Hackathon",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE, hackathon_mode=True,
+        )
+        bus.uow.initiative_repo.add(initiative)
+
+        results = bus.handle(JoinHackathon(initiative_id=initiative_id, user_id=user_id))
+        entry = bus.uow.leaderboard_repo.get_by_user_and_initiative(initiative_id, user_id)
+        assert entry is not None
+        assert entry.score == 0.0
+
+    def test_join_non_hackathon_raises(self) -> None:
+        bus = bootstrap()
+        initiative = Initiative(
+            id=uuid4(), owner_id=uuid4(), name="Normal",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE, hackathon_mode=False,
+        )
+        bus.uow.initiative_repo.add(initiative)
+        with pytest.raises(ValueError, match="not a hackathon"):
+            bus.handle(JoinHackathon(initiative_id=initiative.id, user_id=uuid4()))
+
+    def test_join_twice_raises(self) -> None:
+        bus = bootstrap()
+        initiative_id = uuid4()
+        user_id = uuid4()
+        initiative = Initiative(
+            id=initiative_id, owner_id=uuid4(), name="Hackathon",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE, hackathon_mode=True,
+        )
+        bus.uow.initiative_repo.add(initiative)
+        bus.handle(JoinHackathon(initiative_id=initiative_id, user_id=user_id))
+        with pytest.raises(ValueError, match="already joined"):
+            bus.handle(JoinHackathon(initiative_id=initiative_id, user_id=user_id))
+
+
+class TestSubmitHackathonResult:
+    def test_submit_updates_score(self) -> None:
+        bus = bootstrap()
+        initiative_id = uuid4()
+        user_id = uuid4()
+        initiative = Initiative(
+            id=initiative_id, owner_id=user_id, name="Hackathon",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE, hackathon_mode=True,
+        )
+        bus.uow.initiative_repo.add(initiative)
+        bus.handle(JoinHackathon(initiative_id=initiative_id, user_id=user_id))
+        bus.handle(SubmitHackathonResult(initiative_id=initiative_id, user_id=user_id, score=95.0, accuracy_pct=0.95))
+        entry = bus.uow.leaderboard_repo.get_by_user_and_initiative(initiative_id, user_id)
+        assert entry is not None
+        assert entry.score == 95.0
+        assert entry.polygons_submitted == 1
+
+    def test_submit_without_join_raises(self) -> None:
+        bus = bootstrap()
+        with pytest.raises(ValueError, match="not joined"):
+            bus.handle(SubmitHackathonResult(initiative_id=uuid4(), user_id=uuid4(), score=50.0, accuracy_pct=0.5))

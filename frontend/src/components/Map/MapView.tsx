@@ -4,24 +4,28 @@ import { useEffect, useRef, useState } from "react"
 import maplibregl from "maplibre-gl"
 import "maplibre-gl/dist/maplibre-gl.css"
 
+import type { ImagerySource } from "@/types/polygon"
+import { IMAGERY_SOURCES } from "@/types/polygon"
+
 interface MapViewProps {
   onPolygonDraw?: (geometry: number[][][]) => void
   highlightPolygon?: number[][][] | null
   className?: string
+  imagerySource?: ImagerySource
 }
-
-const NAIP_TILE_URL =
-  "https://tiles.planet.com/basemaps/v1/planet-tiles/global_quarterly_2024q1mosaic/gmap/{z}/{x}/{y}.png?api_key=DEMO_API_KEY"
 
 export default function MapView({
   onPolygonDraw,
   highlightPolygon,
   className = "",
+  imagerySource = IMAGERY_SOURCES[0],
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
+  const drawingRef = useRef(false)
   const [drawing, setDrawing] = useState(false)
   const [points, setPoints] = useState<[number, number][]>([])
+  const { tileUrl, attribution } = imagerySource
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return
@@ -31,17 +35,18 @@ export default function MapView({
       style: {
         version: 8,
         sources: {
-          "naip-tiles": {
+          "base-tiles": {
             type: "raster",
-            tiles: [NAIP_TILE_URL],
+            tiles: [tileUrl],
             tileSize: 256,
+            attribution,
           },
         },
         layers: [
           {
-            id: "naip-tiles-layer",
+            id: "base-tiles-layer",
             type: "raster",
-            source: "naip-tiles",
+            source: "base-tiles",
             minzoom: 0,
             maxzoom: 20,
           },
@@ -52,7 +57,7 @@ export default function MapView({
     })
 
     m.on("click", (e) => {
-      if (!drawing) return
+      if (!drawingRef.current) return
       setPoints((prev) => [...prev, [e.lngLat.lng, e.lngLat.lat]])
     })
 
@@ -62,7 +67,33 @@ export default function MapView({
       m.remove()
       map.current = null
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    drawingRef.current = drawing
   }, [drawing])
+
+  useEffect(() => {
+    if (!map.current) return
+    const m = map.current
+    if (m.getLayer("base-tiles-layer")) {
+      m.removeLayer("base-tiles-layer")
+      m.removeSource("base-tiles")
+    }
+    m.addSource("base-tiles", {
+      type: "raster",
+      tiles: [tileUrl],
+      tileSize: 256,
+    })
+    m.addLayer({
+      id: "base-tiles-layer",
+      type: "raster",
+      source: "base-tiles",
+      minzoom: 0,
+      maxzoom: 20,
+    })
+  }, [tileUrl, attribution])
 
   useEffect(() => {
     if (!map.current) return
@@ -129,7 +160,6 @@ export default function MapView({
       })
     }
 
-    // Fit map to polygon bounds
     const bounds = new maplibregl.LngLatBounds()
     highlightPolygon[0].forEach(([lng, lat]) => bounds.extend([lng, lat]))
     m.fitBounds(bounds, { padding: 50 })
@@ -158,7 +188,6 @@ export default function MapView({
     <div className={`relative ${className}`}>
       <div ref={mapContainer} className="h-full w-full" />
 
-      {/* Controls */}
       <div className="absolute top-4 left-4 z-10 flex gap-2">
         {!drawing ? (
           <button

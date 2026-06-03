@@ -16,6 +16,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import sentry_sdk
 from google.cloud import storage
 from google.cloud import pubsub_v1
 
@@ -24,6 +25,12 @@ LANDING_BUCKET = os.getenv("LANDING_BUCKET", "realitysync-raw-uploads")
 PRODUCTION_BUCKET = os.getenv("PRODUCTION_BUCKET", "realitysync-cogs")
 DB_DSN = os.getenv("DB_DSN", "")
 PROJECT_ID = os.getenv("GCP_PROJECT", "")
+
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    environment=os.getenv("APP_ENV", "production"),
+    traces_sample_rate=0.1,
+)
 
 storage_client = storage.Client()
 

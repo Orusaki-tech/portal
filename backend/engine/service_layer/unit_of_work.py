@@ -6,19 +6,27 @@ import psycopg2
 
 from backend.engine.adapters.repository import (
     AbstractCorrectionRepository,
+    AbstractCreditTransactionRepository,
     AbstractExportRepository,
     AbstractInitiativeRepository,
+    AbstractLeaderboardRepository,
     AbstractMarketplaceRepository,
+    AbstractMlPolygonSetRepository,
     AbstractParticipantRepository,
     AbstractTaskGridRepository,
     AbstractUserRepository,
+    AbstractValidationRunRepository,
     PostgresCorrectionRepository,
+    PostgresCreditTransactionRepository,
     PostgresExportRepository,
     PostgresInitiativeRepository,
+    PostgresLeaderboardRepository,
     PostgresMarketplaceRepository,
+    PostgresMlPolygonSetRepository,
     PostgresParticipantRepository,
     PostgresTaskGridRepository,
     PostgresUserRepository,
+    PostgresValidationRunRepository,
 )
 
 
@@ -30,6 +38,10 @@ class UnitOfWork(Protocol):
     export_repo: AbstractExportRepository
     participant_repo: AbstractParticipantRepository
     marketplace_repo: AbstractMarketplaceRepository
+    polygon_set_repo: AbstractMlPolygonSetRepository
+    leaderboard_repo: AbstractLeaderboardRepository
+    credit_txn_repo: AbstractCreditTransactionRepository
+    validation_run_repo: AbstractValidationRunRepository
 
     def __enter__(self) -> UnitOfWork: ...
     def __exit__(self, *args: Any) -> None: ...
@@ -48,15 +60,23 @@ class FakeUnitOfWork:
         export_repo: AbstractExportRepository | None = None,
         participant_repo: AbstractParticipantRepository | None = None,
         marketplace_repo: AbstractMarketplaceRepository | None = None,
+        polygon_set_repo: AbstractMlPolygonSetRepository | None = None,
+        leaderboard_repo: AbstractLeaderboardRepository | None = None,
+        credit_txn_repo: AbstractCreditTransactionRepository | None = None,
+        validation_run_repo: AbstractValidationRunRepository | None = None,
     ) -> None:
         from backend.engine.adapters.repository import (
             FakeCorrectionRepository,
+            FakeCreditTransactionRepository,
             FakeExportRepository,
             FakeInitiativeRepository,
+            FakeLeaderboardRepository,
             FakeMarketplaceRepository,
+            FakeMlPolygonSetRepository,
             FakeParticipantRepository,
             FakeTaskGridRepository,
             FakeUserRepository,
+            FakeValidationRunRepository,
         )
 
         self.grid_repo = grid_repo or FakeTaskGridRepository()
@@ -66,6 +86,10 @@ class FakeUnitOfWork:
         self.export_repo = export_repo or FakeExportRepository()
         self.participant_repo = participant_repo or FakeParticipantRepository()
         self.marketplace_repo = marketplace_repo or FakeMarketplaceRepository()
+        self.polygon_set_repo = polygon_set_repo or FakeMlPolygonSetRepository()
+        self.leaderboard_repo = leaderboard_repo or FakeLeaderboardRepository()
+        self.credit_txn_repo = credit_txn_repo or FakeCreditTransactionRepository()
+        self.validation_run_repo = validation_run_repo or FakeValidationRunRepository()
         self.committed = False
         self.rolled_back = False
         self._events: list = []
@@ -91,6 +115,9 @@ class FakeUnitOfWork:
         for user in self.user_repo._users.values():
             events.extend(user.events)
             user.clear_events()
+        for entry in self.leaderboard_repo._entries.values():
+            events.extend(entry.events)
+            entry.clear_events()
         return events
 
     @property
@@ -109,6 +136,10 @@ class PostgresUnitOfWork:
         self.export_repo: PostgresExportRepository | None = None
         self.participant_repo: PostgresParticipantRepository | None = None
         self.marketplace_repo: PostgresMarketplaceRepository | None = None
+        self.polygon_set_repo: PostgresMlPolygonSetRepository | None = None
+        self.leaderboard_repo: PostgresLeaderboardRepository | None = None
+        self.credit_txn_repo: PostgresCreditTransactionRepository | None = None
+        self.validation_run_repo: PostgresValidationRunRepository | None = None
         self._events: list = []
 
     def __enter__(self) -> PostgresUnitOfWork:
@@ -121,6 +152,10 @@ class PostgresUnitOfWork:
         self.export_repo = PostgresExportRepository(self.conn)
         self.participant_repo = PostgresParticipantRepository(self.conn)
         self.marketplace_repo = PostgresMarketplaceRepository(self.conn)
+        self.polygon_set_repo = PostgresMlPolygonSetRepository(self.conn)
+        self.leaderboard_repo = PostgresLeaderboardRepository(self.conn)
+        self.credit_txn_repo = PostgresCreditTransactionRepository(self.conn)
+        self.validation_run_repo = PostgresValidationRunRepository(self.conn)
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -148,6 +183,10 @@ class PostgresUnitOfWork:
             for user in self.user_repo.seen.values():
                 events.extend(user.events)
                 user.clear_events()
+        if self.leaderboard_repo:
+            for entry in self.leaderboard_repo.seen.values():
+                events.extend(entry.events)
+                entry.clear_events()
         return events
 
     @property

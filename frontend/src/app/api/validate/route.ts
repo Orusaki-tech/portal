@@ -5,7 +5,7 @@ const API_BASE = process.env.API_URL || "http://localhost:8000"
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { geometry } = body
+    const { geometry, user_id } = body
 
     if (!geometry) {
       return Response.json(
@@ -14,12 +14,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Proxy to backend
+    if (!user_id) {
+      return Response.json(
+        { error: "user_id is required — please log in" },
+        { status: 401 }
+      )
+    }
+
     const res = await fetch(`${API_BASE}/api/datasets/upload`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        user_id: "00000000-0000-0000-0000-000000000000",
+        user_id,
         name: "Web Upload",
         geometries: [geometry],
       }),

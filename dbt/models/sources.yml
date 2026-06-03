@@ -15,3 +15,6 @@ sources:
       - name: export_jobs
       - name: marketplace_listings
       - name: dataset_purchases
+      - name: users
+      - name: user_imagery
+      - name: hackathon_leaderboard

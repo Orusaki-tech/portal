@@ -47,3 +47,26 @@ export interface TriageItem {
   correction_count: number
   priority_tier: "auto_approved" | "needs_review" | "needs_correction" | "escalate"
 }
+
+export interface ImagerySource {
+  id: string
+  label: string
+  tileUrl: string
+  attribution: string
+}
+
+
+export const IMAGERY_SOURCES: ImagerySource[] = [
+  {
+    id: "naip",
+    label: "NAIP (1m, US)",
+    tileUrl: "http://localhost:8000/tiles/naip/{z}/{x}/{y}.png",
+    attribution: "USDA NAIP — Planet Labs",
+  },
+  {
+    id: "sentinel-2-l2a",
+    label: "Sentinel-2 (10m, Global)",
+    tileUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Esri, Sentinel-2",
+  },
+]

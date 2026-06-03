@@ -1,16 +1,37 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import type { TriageItem } from "@/types/polygon"
 
 export default function DashboardPage() {
-  const [items] = useState<TriageItem[]>([])
+  const router = useRouter()
+  const [items, setItems] = useState<TriageItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    import("@/lib/api").then(({ getTriage }) => {
+      getTriage()
+        .then((data) => setItems(data.items as TriageItem[]))
+        .catch((err) => setError(err instanceof Error ? err.message : "Failed to load triage"))
+        .finally(() => setLoading(false))
+    })
+  }, [])
 
   return (
     <div className="mx-auto max-w-5xl p-6">
       <h1 className="mb-6 text-2xl font-bold">Triage Queue</h1>
 
-      {items.length === 0 ? (
+      {error && (
+        <div className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">{error}</div>
+      )}
+
+      {loading ? (
+        <div className="rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
+          <p className="text-gray-500">Loading triage queue...</p>
+        </div>
+      ) : items.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
           <p className="text-gray-500">
             No polygons in the triage queue.
@@ -58,7 +79,10 @@ export default function DashboardPage() {
                 </td>
                 <td className="py-2">{item.correction_count}</td>
                 <td className="py-2">
-                  <button className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700">
+                  <button
+                    onClick={() => router.push(`/?review=${item.polygon_id}`)}
+                    className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+                  >
                     Review
                   </button>
                 </td>

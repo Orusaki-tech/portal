@@ -1,21 +1,19 @@
 -- Converts TEXT geometry columns to PostGIS GEOMETRY type.
--- Only runs if PostGIS extension is available.
--- Safe to run repeatedly — checks PostGIS availability and column type before converting.
+-- Installs PostGIS extension if available, then upgrades columns.
+-- Fails gracefully if PostGIS shared library is not installed.
+-- Safe to run repeatedly — idempotent via IF NOT EXISTS.
 
 DO $$
-DECLARE
-    has_postgis BOOLEAN;
 BEGIN
-    SELECT EXISTS (
-        SELECT 1 FROM pg_extension WHERE extname = 'postgis'
-    ) INTO has_postgis;
+    CREATE EXTENSION IF NOT EXISTS postgis;
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'PostGIS not available (%), skipping geometry upgrade', SQLERRM;
+    RETURN;
+END $$;
 
-    IF NOT has_postgis THEN
-        RAISE NOTICE 'PostGIS not available — skipping geometry upgrade';
-        RETURN;
-    END IF;
-
-    RAISE NOTICE 'PostGIS available — upgrading geometry columns';
+DO $$
+BEGIN
+    RAISE NOTICE 'PostGIS extension ready — upgrading geometry columns';
 
     -- ml_polygons
     ALTER TABLE ml_polygons ALTER COLUMN original_geometry TYPE GEOMETRY(POLYGON, 4326)

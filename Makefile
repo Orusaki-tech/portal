@@ -6,7 +6,7 @@ PIP = $(VENV)/bin/pip
 
 # Virtual environment
 venv:
-	python3.11 -m venv $(VENV)
+	python3 -m venv $(VENV)
 	$(PIP) install --upgrade pip
 	$(PIP) install -e ".[dev]"
 
@@ -30,18 +30,24 @@ docker-psql:
 migrate:
 	$(PYTHON) database/run_migrations.py
 
+docker-migrate:
+	docker compose exec api python database/run_migrations.py
+
 db-reset:
 	docker compose down -v
-	docker compose up -d
+	docker compose up -d postgis --wait
 	sleep 3
-	$(MAKE) migrate
+	$(MAKE) docker-migrate
 
 # Testing & linting
 dev:
 	@echo "Starting API on :8000 and Frontend on :3000..."
 	@trap 'kill 0' EXIT; \
-		uvicorn backend.engine.entrypoints.api:app --reload --host 0.0.0.0 --port 8000 & \
+		$(PYTHON) backend/engine/entrypoints/main.py & \
 		cd frontend && npm run dev
+
+run:
+	$(PYTHON) backend/engine/entrypoints/main.py
 test:
 	$(PYTHON) -m pytest -v
 
@@ -56,6 +62,12 @@ lint-fix:
 
 typecheck:
 	$(VENV)/bin/mypy backend/
+
+pre-commit-install:
+	$(VENV)/bin/pre-commit install
+
+pre-commit-run:
+	$(VENV)/bin/pre-commit run --all-files
 
 # Cleanup
 clean:

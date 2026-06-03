@@ -1,0 +1,42 @@
+# Edge algorithm configuration
+# Frozen hyperparameters from Phase 2 experimentation
+
+stac:
+  api_url: "https://planetarycomputer.microsoft.com/api/stac/v1"
+  collection: "naip"
+  max_items: 5
+  search_radius_km: 10
+
+buffer:
+  width_meters: 2.0
+
+contrast:
+  clip_percentiles: [2, 98]
+
+kmeans:
+  n_clusters: 3
+  random_state: 42
+
+snake:
+  max_iterations: 100
+  alpha: 0.01
+  beta: 0.1
+  convergence: 0.1
+
+confidence:
+  spectral_weight: 0.40
+  movement_weight: 0.30
+  deviation_weight: 0.30
+  threshold: 0.70
+
+export:
+  valid_formats:
+    - geojson
+    - coco
+    - yolo
+    - pascal_voc
+    - tfrecord
+  valid_sources:
+    - dataset
+    - initiative
+    - grid

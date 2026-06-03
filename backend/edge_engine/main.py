@@ -15,12 +15,12 @@ Workflow:
 import os
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
+import numpy as np
 from rio_tiler.io import COGReader
 from shapely.geometry import shape, Polygon
-from shapely import affinity
 
 from stac_client import find_best_imagery_for_polygon
 from edge_detector import (
@@ -48,10 +48,6 @@ def extract_buffer_around_polygon(
     Stream only the pixel bytes within a buffer strip around the polygon boundary.
     Returns pixel matrix and the affine transform.
     """
-    import numpy as np
-    from rio_tiler.io import COGReader
-    from shapely.geometry import shape
-    
     poly = shape(polygon_geometry)
     buffered = poly.buffer(buffer_meters)
     boundary_only = Polygon(buffered.exterior)  # thin strip
@@ -64,9 +60,6 @@ def extract_buffer_around_polygon(
 
 def extract_boundary_vertices(polygon_geometry: dict) -> np.ndarray:
     """Extract the ML-predicted boundary as a numpy array of (x, y) vertices."""
-    import numpy as np
-    from shapely.geometry import shape
-    
     poly = shape(polygon_geometry)
     coords = list(poly.exterior.coords)
     return np.array(coords)
@@ -79,8 +72,6 @@ def process_single_polygon(
     buffer_meters: float = 2.0,
     confidence_threshold: float = 0.7,
 ) -> EdgeResult:
-    import numpy as np
-    
     # 1. Find overlapping imagery
     imagery = find_best_imagery_for_polygon(geometry)
     if not imagery:
@@ -167,7 +158,7 @@ def process_single_polygon(
         is_ambiguous=ambiguous,
         confidence_avg=confidence,
         vertices=vertices,
-        processed_at=datetime.utcnow(),
+        processed_at=datetime.now(timezone.utc),
     )
 
 
@@ -179,26 +170,26 @@ def write_results_to_db(results: list[EdgeResult], db_dsn: str):
     cur = conn.cursor()
     
     for result in results:
-        cur.execute("""
-            INSERT INTO edge_metrics (polygon_id, run_id, vertex_index,
-                deviation_meters, spectral_contrast, snake_strain,
-                confidence_score, is_ambiguous)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            result.polygon_id, result.run_id, 0,
-            result.vertices[0].deviation_meters if result.vertices else 0,
-            result.vertices[0].spectral_contrast if result.vertices else 0,
-            result.vertices[0].snake_strain if result.vertices else 0,
-            result.confidence_avg,
-            result.is_ambiguous,
-        ))
-        
+        for vertex in result.vertices:
+            cur.execute("""
+                INSERT INTO edge_metrics (polygon_id, run_id, vertex_index,
+                    deviation_meters, spectral_contrast, snake_strain,
+                    confidence_score, is_ambiguous)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                result.polygon_id, result.run_id, vertex.vertex_index,
+                vertex.deviation_meters, vertex.spectral_contrast,
+                vertex.snake_strain, vertex.confidence_score,
+                result.is_ambiguous,
+            ))
+
+        qa_status = "low_confidence" if result.is_ambiguous else "validated"
         cur.execute("""
             UPDATE ml_polygons
             SET confidence_avg = %s,
-                qa_status = CASE WHEN %s THEN 'CRITICAL_MISMATCH' ELSE 'VALIDATED' END
+                qa_status = %s
             WHERE id = %s
-        """, (result.confidence_avg, result.is_ambiguous, result.polygon_id))
+        """, (result.confidence_avg, qa_status, result.polygon_id))
     
     conn.commit()
     cur.close()

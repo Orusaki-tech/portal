@@ -2,7 +2,7 @@
 name = "realitysync"
 version = "0.1.0"
 description = "Geospatial boundary validation and data curation platform"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.13"
 dependencies = [
     "rio-tiler~=6.0",
     "rasterio~=1.4",
@@ -10,6 +10,7 @@ dependencies = [
     "scikit-learn~=1.5",
     "numpy~=1.26",
     "shapely~=2.0",
+    "pyproj~=3.6",
     "pystac-client~=0.8",
     "httpx~=0.27",
     "pydantic~=2.0",
@@ -20,6 +21,7 @@ dependencies = [
     "fastapi~=0.115",
     "uvicorn~=0.32",
     "titiler~=0.17",
+    "sentry-sdk~=2.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -40,12 +42,12 @@ dev = [
 
 [tool.mypy]
 strict = true
-python_version = "3.11"
+python_version = "3.13"
 warn_unused_ignores = true
 ignore_missing_imports = true
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]

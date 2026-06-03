@@ -68,7 +68,21 @@ jobs:
       - name: Ruff check
         run: ruff check backend/
       - name: MyPy check
-        run: mypy backend/ --ignore-missing-imports || true
+        run: mypy backend/ --ignore-missing-imports
+
+  dbt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dbt
+        run: pip install dbt-postgres
+      - name: dbt debug
+        run: dbt debug --project-dir dbt --profiles-dir dbt
+      - name: dbt parse
+        run: dbt parse --project-dir dbt --profiles-dir dbt
 
   frontend:
     runs-on: ubuntu-latest

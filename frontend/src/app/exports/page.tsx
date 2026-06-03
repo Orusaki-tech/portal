@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { requestExport } from "@/lib/api"
 
 interface ExportJob {
@@ -14,21 +14,44 @@ interface ExportJob {
 export default function ExportsPage() {
   const [status, setStatus] = useState("")
   const [jobs, setJobs] = useState<ExportJob[]>([])
-  const userId = "00000000-0000-0000-0000-000000000001"
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(false)
+  }, [])
+
+  const currentUserId = () => {
+    if (typeof window === "undefined") return ""
+    return JSON.parse(localStorage.getItem("realitysync_user") || "{}").user_id || ""
+  }
 
   const handleRequest = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    const userId = currentUserId()
+    if (!userId) { setStatus("Please log in first"); return }
     const fd = new FormData(e.currentTarget)
+    const sourceId = (fd.get("sourceId") as string)?.trim()
+    if (!sourceId) { setStatus("Source ID is required"); return }
+    const qaStatus = fd.get("qaStatus") as string
+    const confidenceMin = fd.get("confidenceMin") as string
+    const confidenceMax = fd.get("confidenceMax") as string
+    const includeOriginal = fd.get("includeOriginal") === "on"
+    const filters: Record<string, unknown> = {}
+    if (qaStatus) filters.qa_status = qaStatus
+    if (confidenceMin) filters.confidence_min = parseFloat(confidenceMin)
+    if (confidenceMax) filters.confidence_max = parseFloat(confidenceMax)
+    filters.include_original = includeOriginal
     try {
       const result = await requestExport(
         userId,
         fd.get("format") as string,
         fd.get("sourceType") as string,
-        crypto.randomUUID(),
+        sourceId,
+        filters,
       )
       setStatus(`Export ${result.export_id.slice(0, 8)} — ${result.status}`)
       setJobs((prev) => [
-        { export_id: result.export_id, export_format: result.export_format, source_type: fd.get("sourceType") as string, source_id: crypto.randomUUID(), status: result.status },
+        { export_id: result.export_id, export_format: result.export_format, source_type: fd.get("sourceType") as string, source_id: sourceId, status: result.status },
         ...prev,
       ])
     } catch (err) {
@@ -36,7 +59,7 @@ export default function ExportsPage() {
     }
   }
 
-  const formats = ["geojson", "coco", "yolo", "pascal_voc", "tfrecord"]
+  const formats = ["geojson", "coco", "yolo", "pascal_voc", "tfrecord", "parquet", "geopackage"]
   const sourceTypes = ["dataset", "initiative", "grid"]
 
   return (
@@ -62,6 +85,35 @@ export default function ExportsPage() {
               {sourceTypes.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Source ID</label>
+            <input name="sourceId" placeholder="UUID" required className="rounded border border-gray-300 px-3 py-2 text-sm font-mono text-xs w-64" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">QA Status</label>
+            <select name="qaStatus" className="rounded border border-gray-300 px-3 py-2 text-sm">
+              <option value="">All</option>
+              <option value="pending">Pending</option>
+              <option value="validated">Validated</option>
+              <option value="low_confidence">Low Confidence</option>
+              <option value="corrected">Corrected</option>
+              <option value="escalated">Escalated</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Confidence Min</label>
+            <input name="confidenceMin" type="number" min="0" max="1" step="0.1" placeholder="0.0" className="rounded border border-gray-300 px-3 py-2 text-sm w-20" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Confidence Max</label>
+            <input name="confidenceMax" type="number" min="0" max="1" step="0.1" placeholder="1.0" className="rounded border border-gray-300 px-3 py-2 text-sm w-20" />
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-xs text-gray-500">
+              <input name="includeOriginal" type="checkbox" defaultChecked className="rounded" />
+              Include Original
+            </label>
+          </div>
           <button type="submit" className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700">
             Request Export
           </button>
@@ -69,7 +121,12 @@ export default function ExportsPage() {
       </div>
 
       <h2 className="mb-3 text-lg font-semibold">Export History</h2>
-      {jobs.length === 0 ? (
+      {loading ? (
+        <div className="rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
+          <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+          <p className="text-gray-500">Loading exports...</p>
+        </div>
+      ) : jobs.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
           <p className="text-gray-500">No exports yet.</p>
         </div>

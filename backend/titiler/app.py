@@ -11,6 +11,7 @@ Intended to run behind Cloud CDN for edge caching.
 import os
 import re
 
+import sentry_sdk
 from fastapi import FastAPI, Query
 from fastapi.responses import Response
 from titiler.core.factory import TilerFactory
@@ -19,6 +20,12 @@ from rasterio.io import MemoryFile
 
 from starlette.middleware.cors import CORSMiddleware
 
+
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    environment=os.getenv("APP_ENV", "development"),
+    traces_sample_rate=0.1,
+)
 
 app = FastAPI(
     title="RealitySync Tile Server",
@@ -59,6 +66,7 @@ async def tile(
     Serve a single map tile from a COG.
     URL points to either a public STAC-hosted COG (NAIP) or a user-uploaded COG in GCS.
     """
+    import httpx
     from titiler.core.factory import TileFactory
     
     tile_factory = TileFactory()
@@ -66,8 +74,14 @@ async def tile(
     
     image_type = ImageType[format.upper()] if format.upper() in ImageType.__members__ else ImageType.WEBP
     
-    with MemoryFile() as memfile:
-        with memfile.open(url) as src:
+    try:
+        resp = httpx.get(url, timeout=30)
+        resp.raise_for_status()
+    except (httpx.HTTPError, httpx.TimeoutException) as exc:
+        return Response(status_code=404, content=f"COG not found or unreachable: {exc}")
+    
+    with MemoryFile(resp.content) as memfile:
+        with memfile.open() as src:
             tile_data = src.read(
                 indexes=[1, 2, 3],
                 window=tile_params.window,

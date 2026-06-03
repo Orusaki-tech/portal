@@ -27,6 +27,9 @@ docker-data/
 # Jupyter
 .ipynb_checkpoints/
 
+# Pre-downloaded wheels (platform-specific)
+*.whl
+
 # dbt
 dbt/target/
 dbt/logs/
@@ -36,3 +39,4 @@ dbt/dbt_packages/
 infrastructure/terraform/.terraform/
 infrastructure/terraform/terraform.tfstate*
 infrastructure/terraform/*.plan
+infrastructure/terraform/terraform.tfvars

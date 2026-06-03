@@ -100,10 +100,123 @@ User {
   id: UUID
   email: str                   // Unique
   name: str
-  role: admin | manager | annotator | reviewer
+  role: admin | manager | annotator | reviewer | senior_reviewer | viewer
   credits_remaining: Decimal   // Must always be ≥ 0
+  subscription_tier: free | starter | professional
+  api_key: str?
   created_at: Timestamp
   updated_at: Timestamp
+}
+```
+
+### `Initiative`
+
+```
+Initiative {
+  id: UUID
+  owner_id: UUID
+  name: str
+  region: GEOMETRY
+  status: draft | active | paused | complete | archived
+  grid_size_m: int
+  budget_credits: Decimal?
+  hackathon_mode: bool
+  max_participants: int?
+  created_at: Timestamp
+  completed_at: Timestamp?
+}
+```
+
+### `Correction`
+
+```
+Correction {
+  id: UUID
+  polygon_id: UUID
+  user_id: UUID
+  original_geometry: POLYGON
+  corrected_geometry: POLYGON
+  action: correct | refine | reset
+  notes: str?
+  created_at: Timestamp
+}
+```
+
+### `ExportJob`
+
+```
+ExportJob {
+  export_id: UUID
+  user_id: UUID
+  export_format: geojson | coco | yolo | pascal_voc | tfrecord | parquet | geopackage
+  source_type: dataset | initiative | grid
+  source_id: UUID
+  status: pending | processing | complete | failed
+  output_url: str?
+  error_message: str?
+  export_params: dict?       // Filters: qa_status, confidence_min/max, include_original
+  created_at: Timestamp?
+  completed_at: Timestamp?
+}
+```
+
+### `MarketplaceListing`
+
+```
+MarketplaceListing {
+  listing_id: UUID
+  seller_id: UUID
+  dataset_id: UUID
+  title: str
+  price_tokens: Decimal
+  geometry_count: int
+  quality_score: float?       // 0.0–1.0, computed from polygon confidence
+  completion_rate: float?     // 0.0–1.0, computed from polygon validation status
+  description: str?
+  status: active | sold | archived
+  created_at: Timestamp?
+}
+```
+
+### `DatasetPurchase`
+
+```
+DatasetPurchase {
+  purchase_id: UUID
+  listing_id: UUID
+  buyer_id: UUID
+  dataset_id: UUID
+  tokens_paid: Decimal
+  purchased_at: Timestamp?
+}
+```
+
+### `CreditTransaction`
+
+```
+CreditTransaction {
+  id: UUID
+  user_id: UUID
+  amount: Decimal
+  transaction_type: top_up | validation | correction | purchase | refund
+  reference_id: UUID?
+  description: str?
+  created_at: Timestamp?
+}
+```
+
+### `LeaderboardEntry`
+
+```
+LeaderboardEntry {
+  id: UUID
+  initiative_id: UUID
+  user_id: UUID
+  score: float (0.0–1.0)
+  polygons_submitted: int
+  accuracy_pct: float (0.0–100.0)
+  place: int?
+  submitted_at: Timestamp?
 }
 ```
 
@@ -116,9 +229,6 @@ User {
 | `ConfidenceScore` | `overall: float(0..1)`, `per_vertex: list[float]` | Yes | Computed, not stored directly |
 | `VertexMetric` | `vertex_index: int`, `deviation_m: float`, `spectral_contrast: float`, `snake_strain: float`, `confidence_score: float` | Yes | Per-vertex edge detection output |
 | `Coordinate` | `longitude: float`, `latitude: float` | Yes | WGS-84 decimal degrees |
-| `Geometry` | `wkt: str`, `srid: int` | Yes | Wrapper for raw WKT |
-| `Credits` | `amount: Decimal` | Yes | Wraps monetary/credit math |
-| `GridIndex` | `x: int`, `y: int` | Yes | Web Mercator grid coordinate |
 
 ---
 
@@ -126,13 +236,17 @@ User {
 
 | Event | Raised When | Payload | Handlers |
 |---|---|---|---|
-| `PolygonValidationRequested` | User uploads polygons or triggers validation | `polygon_ids: list[UUID]`, `imagery_id: UUID?` | `handle_validation_request` |
-| `PolygonValidated` | Edge detection completes on one polygon | `polygon_id: UUID`, `confidence: float`, `is_ambiguous: bool` | `handle_classify_confidence` |
-| `LowConfidenceDetected` | Confidence < threshold (0.70) | `polygon_id: UUID`, `confidence: float`, `vertex_metrics: list[VertexMetric]` | `handle_flag_for_review`, `handle_notify_annotator` |
-| `BoundaryCorrected` | Human submits a correction | `polygon_id: UUID`, `user_id: UUID`, `new_geometry: POLYGON`, `old_geometry: POLYGON` | `handle_update_geometry`, `handle_deduct_credits`, `handle_check_grid_complete` |
-| `GridBlockCompleted` | All polygons in a TaskGrid are resolved | `grid_id: UUID`, `initiative_id: UUID` | `handle_check_initiative_complete`, `handle_initiate_qa` |
-| `InitiativeCompleted` | All grid blocks in an initiative are complete | `initiative_id: UUID`, `owner_id: UUID` | `handle_generate_report`, `handle_export_data` |
-| `CreditsExhausted` | User's credits_remaining reaches 0 | `user_id: UUID` | `handle_pause_validation`, `handle_notify_payment` |
+| `GridBlockLocked` | Grid block is locked by a user | `grid_id: UUID`, `user_id: UUID` | `handle_validate_on_lock` |
+| `GridBlockSubmitted` | All polygons in a grid block are reviewed | `grid_id: UUID`, `initiative_id: UUID` | `handle_check_grid_complete` |
+| `GridBlockCompleted` | All polygons in a TaskGrid are resolved | `grid_id: UUID`, `initiative_id: UUID` | `handle_check_initiative_complete` |
+| `GridBlockDisputed` | Grid block review fails peer review | `grid_id: UUID`, `initiative_id: UUID` | `handle_flag_for_senior_review` |
+| `InitiativeCompleted` | All grid blocks in an initiative are complete | `initiative_id: UUID`, `owner_id: UUID` | `handle_initiative_completed_notification` |
+| `DatasetPurchased` | A dataset is bought on the marketplace | `listing_id: UUID`, `buyer_id: UUID`, `dataset_id: UUID` | `handle_dataset_purchased_notification` |
+| `HackathonJoined` | A user joins a hackathon initiative | `initiative_id: UUID`, `user_id: UUID` | `handle_hackathon_joined_notification` |
+| `ConsensusReached` | Peer review reaches consensus on a disputed polygon | `polygon_id: UUID`, `grid_id: UUID`, `merged_geometry: str` | (TODO) |
+| `HackathonScoreUpdated` | Hackathon leaderboard score changes | `initiative_id: UUID`, `user_id: UUID`, `new_score: float` | (TODO) |
+| `BoundaryCorrected` | Human submits a correction | `polygon_id: UUID`, `user_id: UUID`, `new_geometry: POLYGON`, `old_geometry: POLYGON` | `handle_update_geometry`, `handle_deduct_credits` |
+| `CreditsExhausted` | User's credits_remaining reaches 0 | `user_id: UUID` | `handle_pause_validation` |
 
 ---
 

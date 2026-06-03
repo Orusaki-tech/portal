@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from collections.abc import Callable
 from typing import Any
 
@@ -27,9 +28,9 @@ class MessageBus:
 
     def handle(self, message: Message) -> list:
         results = []
-        queue: list[Message] = [message]
+        queue: deque[Message] = deque([message])
         while queue:
-            msg = queue.pop(0)
+            msg = queue.popleft()
             if isinstance(msg, Command):
                 new_events, cmd_result = self._handle_command(msg)
                 results.append(cmd_result)
@@ -55,4 +56,5 @@ class MessageBus:
         logger.debug(f"Handling event: {event}")
         handlers = self.event_handlers.get(type(event), [])
         for handler in handlers:
-            handler(event, self.uow)
+            with self.uow:
+                handler(event, self.uow)

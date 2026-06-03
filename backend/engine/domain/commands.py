@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from uuid import UUID
 
 
@@ -39,7 +40,7 @@ class CreateInitiative(Command):
     name: str
     region: str
     grid_size_m: int = 1000
-    budget_credits: float | None = None
+    budget_credits: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -49,9 +50,39 @@ class LockGridBlock(Command):
 
 
 @dataclass(frozen=True)
+class ClaimGridBlock(Command):
+    initiative_id: UUID
+    user_id: UUID
+
+
+@dataclass(frozen=True)
+class SubmitGridBlock(Command):
+    grid_id: UUID
+
+
+@dataclass(frozen=True)
+class ApproveGridBlock(Command):
+    grid_id: UUID
+    reviewer_id: UUID
+
+
+@dataclass(frozen=True)
+class DisputeGridBlock(Command):
+    grid_id: UUID
+    reviewer_id: UUID
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class BulkAssignGridBlocks(Command):
+    grid_ids: list[UUID]
+    user_id: UUID
+
+
+@dataclass(frozen=True)
 class TopUpCredits(Command):
     user_id: UUID
-    amount: float
+    amount: Decimal
 
 
 @dataclass(frozen=True)
@@ -60,6 +91,11 @@ class RequestExport(Command):
     export_format: str
     source_type: str
     source_id: UUID
+    qa_status: str | None = None
+    confidence_min: float | None = None
+    confidence_max: float | None = None
+    annotator_id: UUID | None = None
+    include_original: bool = True
 
 
 @dataclass(frozen=True)
@@ -79,7 +115,7 @@ class ListDatasetForSale(Command):
     seller_id: UUID
     dataset_id: UUID
     title: str
-    price_tokens: float
+    price_tokens: Decimal
     geometry_count: int = 0
     description: str | None = None
 
@@ -88,3 +124,24 @@ class ListDatasetForSale(Command):
 class PurchaseDataset(Command):
     listing_id: UUID
     buyer_id: UUID
+
+
+@dataclass(frozen=True)
+class JoinHackathon(Command):
+    initiative_id: UUID
+    user_id: UUID
+
+
+@dataclass(frozen=True)
+class SubmitHackathonResult(Command):
+    initiative_id: UUID
+    user_id: UUID
+    score: float
+    accuracy_pct: float
+
+
+@dataclass(frozen=True)
+class ScoreHackathonSubmission(Command):
+    initiative_id: UUID
+    submission_id: UUID
+    score: float

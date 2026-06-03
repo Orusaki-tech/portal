@@ -11,14 +11,14 @@ Architecture Patterns with Python (Percival & Gregory) — RealitySync mapping.
 | 1 | **Domain Model** | 1 | `backend/engine/domain/models.py` | `TaskGrid`, `Polygon`, `ConfidenceScore`, `VertexMetric` |
 | 2 | **Domain Events** | 1 | `backend/engine/domain/events.py` | `PolygonValidated`, `LowConfidenceDetected`, `BoundaryCorrected` |
 | 3 | **Repository** | 2 | `backend/engine/adapters/repository.py` | `AbstractTaskGridRepository(Protocol)`, `PostgresTaskGridRepository`, `FakeTaskGridRepository` |
-| 4 | **Service Layer / Handlers** | 4 | `backend/engine/service_layer/handlers.py` | `handle_validate_polygon(cmd, uow)`, `handle_correct_boundary(cmd, uow)` |
+| 4 | **Service Layer / Handlers** | 4 | `backend/engine/service_layer/handlers/` | `handle_validate_polygon(cmd, uow)`, `handle_correct_boundary(cmd, uow)` |
 | 5 | **Unit of Work** | 6 | `backend/engine/service_layer/unit_of_work.py` | `PostgresUnitOfWork` (contextmanager + `seen` + event dispatch) |
 | 6 | **Aggregate** | 7 | `backend/engine/domain/models.py` | `TaskGrid` (consistency boundary for multi-user editing) |
 | 7 | **Message Bus** | 8 | `backend/engine/service_layer/messagebus.py` | `MessageBus.handle(message)` — routes commands/events to handlers |
 | 8 | **Dependency Injection** | 8 | `backend/engine/service_layer/messagebus.py` | Handlers receive UoW via injectable dependency |
 | 9 | **Commands** | 8 | `backend/engine/domain/commands.py` | `ValidatePolygon`, `CorrectBoundary`, `UploadPolygonSet` |
 | 10 | **Event-Driven Architecture** | 9 | `backend/engine/service_layer/messagebus.py` | UoW collects events → dispatches after commit |
-| 11 | **CQRS** | 12 | `backend/engine/service_layer/handlers.py` + `dbt/models/` | Write: command handlers. Read: dbt marts + SQL views |
+| 11 | **CQRS** | 12 | `backend/engine/service_layer/handlers/` + `dbt/models/` | Write: command handlers. Read: dbt marts + SQL views |
 | 12 | **Bootstrap** | 13 | `backend/engine/bootstrap.py` | Singleton composition root wiring UoW, repos, bus, handlers |
 
 ---

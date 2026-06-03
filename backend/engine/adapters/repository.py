@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -11,20 +12,32 @@ import psycopg2.extras
 
 from backend.engine.domain.models import (
     Correction,
+    CreditTransaction,
     DatasetPurchase,
     ExportJob,
     GridStatus,
     Initiative,
     InitiativeStatus,
+    LeaderboardEntry,
     MarketplaceListing,
     Participant,
     Polygon,
+    PolygonSet,
     QaStatus,
     TaskGrid,
     User,
+    ValidationRun,
 )
 
 psycopg2.extras.register_uuid()
+
+
+class AbstractMlPolygonSetRepository(ABC):
+    @abstractmethod
+    def add(self, polygon_set: PolygonSet) -> None: ...
+
+    @abstractmethod
+    def get(self, set_id: UUID) -> PolygonSet | None: ...
 
 
 class AbstractTaskGridRepository(ABC):
@@ -51,6 +64,9 @@ class AbstractUserRepository(ABC):
     @abstractmethod
     def get_by_email(self, email: str) -> User | None: ...
 
+    @abstractmethod
+    def get_by_api_key(self, api_key: str) -> User | None: ...
+
 
 class AbstractInitiativeRepository(ABC):
     @abstractmethod
@@ -58,6 +74,9 @@ class AbstractInitiativeRepository(ABC):
 
     @abstractmethod
     def get(self, initiative_id: UUID) -> Initiative | None: ...
+
+    @abstractmethod
+    def list(self, owner_id: UUID | None = None, status: str | None = None) -> list[Initiative]: ...
 
 
 class AbstractCorrectionRepository(ABC):
@@ -105,6 +124,17 @@ class AbstractMarketplaceRepository(ABC):
 
     @abstractmethod
     def set_listing_status(self, listing_id: UUID, status: str) -> None: ...
+
+
+class AbstractLeaderboardRepository(ABC):
+    @abstractmethod
+    def upsert(self, entry: LeaderboardEntry) -> None: ...
+
+    @abstractmethod
+    def get_by_user_and_initiative(self, initiative_id: UUID, user_id: UUID) -> LeaderboardEntry | None: ...
+
+    @abstractmethod
+    def list_by_initiative(self, initiative_id: UUID) -> list[LeaderboardEntry]: ...
 
 
 class FakeTaskGridRepository(AbstractTaskGridRepository):
@@ -258,6 +288,16 @@ class PostgresUserRepository(AbstractUserRepository):
                 return None
             return self._row_to_user(row)
 
+    def get_by_api_key(self, api_key: str) -> User | None:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE api_key = %s", (api_key,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            user = self._row_to_user(row)
+            self.seen[user.id] = user
+            return user
+
     def _row_to_user(self, row: dict[str, Any]) -> User:
         return User(
             id=row["id"],
@@ -265,7 +305,21 @@ class PostgresUserRepository(AbstractUserRepository):
             name=row["name"],
             role=row["role"],
             credits_remaining=Decimal(str(row["credits_remaining"])),
+            subscription_tier=row.get("subscription_tier", "free"),
+            api_key=row.get("api_key"),
         )
+
+    def add(self, user: User) -> None:
+        self.seen[user.id] = user
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (id, email, name, role, credits_remaining, api_key)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (user.id, user.email, user.name, user.role,
+                 user.credits_remaining, user.api_key),
+            )
 
 
 class PostgresInitiativeRepository(AbstractInitiativeRepository):
@@ -292,17 +346,37 @@ class PostgresInitiativeRepository(AbstractInitiativeRepository):
             row = cur.fetchone()
             if row is None:
                 return None
-            return Initiative(
-                id=row["id"],
-                owner_id=row["owner_id"],
-                name=row["name"],
-                region=row["region"],
-                status=InitiativeStatus(row["status"]),
-                grid_size_m=row["grid_size_m"],
-                budget_credits=row.get("budget_credits"),
-                created_at=row.get("created_at"),
-                completed_at=row.get("completed_at"),
+            return self._row_to_initiative(row)
+
+    def list(self, owner_id: UUID | None = None, status: str | None = None) -> list[Initiative]:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            conditions = []
+            params: list = []
+            if owner_id:
+                conditions.append("owner_id = %s")
+                params.append(owner_id)
+            if status:
+                conditions.append("status = %s")
+                params.append(status)
+            where = " AND ".join(conditions) if conditions else "1=1"
+            cur.execute(
+                f"SELECT * FROM initiatives WHERE {where} ORDER BY created_at DESC",
+                params,
             )
+            return [self._row_to_initiative(row) for row in cur.fetchall()]
+
+    def _row_to_initiative(self, row: dict) -> Initiative:
+        return Initiative(
+            id=row["id"],
+            owner_id=row["owner_id"],
+            name=row["name"],
+            region=row["region"],
+            status=InitiativeStatus(row["status"]),
+            grid_size_m=row["grid_size_m"],
+            budget_credits=row.get("budget_credits"),
+            created_at=row.get("created_at"),
+            completed_at=row.get("completed_at"),
+        )
 
 
 class PostgresCorrectionRepository(AbstractCorrectionRepository):
@@ -354,13 +428,14 @@ class PostgresExportRepository(AbstractExportRepository):
             cur.execute(
                 """
                 INSERT INTO export_jobs (export_id, user_id, export_format, source_type,
-                                         source_id, status, output_url, error_message)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                         source_id, status, output_url, error_message, export_params)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     job.export_id, job.user_id, job.export_format,
                     job.source_type, job.source_id, job.status,
                     job.output_url, job.error_message,
+                    json.dumps(job.export_params) if job.export_params else None,
                 ),
             )
 
@@ -390,6 +465,7 @@ class PostgresExportRepository(AbstractExportRepository):
             status=row["status"],
             output_url=row.get("output_url"),
             error_message=row.get("error_message"),
+            export_params=row.get("export_params"),
             created_at=row.get("created_at"),
             completed_at=row.get("completed_at"),
         )
@@ -405,13 +481,14 @@ class PostgresMarketplaceRepository(AbstractMarketplaceRepository):
                 """
                 INSERT INTO marketplace_listings
                     (listing_id, seller_id, dataset_id, title, description,
-                     price_tokens, geometry_count, status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     price_tokens, geometry_count, quality_score, completion_rate, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     listing.listing_id, listing.seller_id, listing.dataset_id,
                     listing.title, listing.description,
-                    listing.price_tokens, listing.geometry_count, listing.status,
+                    listing.price_tokens, listing.geometry_count,
+                    listing.quality_score, listing.completion_rate, listing.status,
                 ),
             )
 
@@ -463,6 +540,8 @@ class PostgresMarketplaceRepository(AbstractMarketplaceRepository):
             description=row.get("description"),
             price_tokens=row["price_tokens"],
             geometry_count=row["geometry_count"],
+            quality_score=row.get("quality_score"),
+            completion_rate=row.get("completion_rate"),
             status=row["status"],
             created_at=row.get("created_at"),
         )
@@ -533,6 +612,12 @@ class FakeUserRepository(AbstractUserRepository):
                 return u
         return None
 
+    def get_by_api_key(self, api_key: str) -> User | None:
+        for u in self._users.values():
+            if u.api_key == api_key:
+                return u
+        return None
+
 
 class FakeInitiativeRepository(AbstractInitiativeRepository):
     def __init__(self) -> None:
@@ -543,6 +628,14 @@ class FakeInitiativeRepository(AbstractInitiativeRepository):
 
     def get(self, initiative_id: UUID) -> Initiative | None:
         return self._initiatives.get(initiative_id)
+
+    def list(self, owner_id: UUID | None = None, status: str | None = None) -> list[Initiative]:
+        results = list(self._initiatives.values())
+        if owner_id:
+            results = [i for i in results if i.owner_id == owner_id]
+        if status:
+            results = [i for i in results if i.status.value == status]
+        return results
 
 
 class FakeCorrectionRepository(AbstractCorrectionRepository):
@@ -584,6 +677,122 @@ class FakeParticipantRepository(AbstractParticipantRepository):
         return [p for p in self._participants if p.user_id == user_id]
 
 
+class PostgresMlPolygonSetRepository(AbstractMlPolygonSetRepository):
+    def __init__(self, conn: psycopg2.extensions.connection) -> None:
+        self.conn = conn
+
+    def add(self, polygon_set: PolygonSet) -> None:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ml_polygon_sets (id, user_id, name, model_version, description)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    polygon_set.id, polygon_set.user_id, polygon_set.name,
+                    polygon_set.model_version, polygon_set.description,
+                ),
+            )
+
+    def get(self, set_id: UUID) -> PolygonSet | None:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM ml_polygon_sets WHERE id = %s", (set_id,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return PolygonSet(
+                id=row["id"],
+                user_id=row["user_id"],
+                name=row["name"],
+                model_version=row.get("model_version"),
+                description=row.get("description"),
+                created_at=row.get("created_at"),
+            )
+
+
+class PostgresLeaderboardRepository(AbstractLeaderboardRepository):
+    def __init__(self, conn: psycopg2.extensions.connection) -> None:
+        self.conn = conn
+        self.seen: dict[UUID, LeaderboardEntry] = {}
+
+    def upsert(self, entry: LeaderboardEntry) -> None:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO hackathon_leaderboard (id, initiative_id, user_id, score, polygons_submitted, accuracy_pct, submitted_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (initiative_id, user_id)
+                DO UPDATE SET
+                    score = EXCLUDED.score,
+                    polygons_submitted = EXCLUDED.polygons_submitted,
+                    accuracy_pct = EXCLUDED.accuracy_pct,
+                    submitted_at = EXCLUDED.submitted_at
+                """,
+                (
+                    entry.id, entry.initiative_id, entry.user_id,
+                    entry.score, entry.polygons_submitted, entry.accuracy_pct,
+                    entry.submitted_at or datetime.now(timezone.utc),
+                ),
+            )
+            self.seen[entry.id] = entry
+
+    def get_by_user_and_initiative(self, initiative_id: UUID, user_id: UUID) -> LeaderboardEntry | None:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM hackathon_leaderboard WHERE initiative_id = %s AND user_id = %s",
+                (initiative_id, user_id),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            entry = LeaderboardEntry(
+                id=row["id"],
+                initiative_id=row["initiative_id"],
+                user_id=row["user_id"],
+                score=float(row["score"]),
+                polygons_submitted=row["polygons_submitted"],
+                accuracy_pct=float(row["accuracy_pct"]),
+                submitted_at=row.get("submitted_at"),
+            )
+            self.seen[entry.id] = entry
+            return entry
+
+    def list_by_initiative(self, initiative_id: UUID) -> list[LeaderboardEntry]:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM hackathon_leaderboard WHERE initiative_id = %s ORDER BY score DESC",
+                (initiative_id,),
+            )
+            rows = cur.fetchall()
+            entries = [
+                LeaderboardEntry(
+                    id=row["id"],
+                    initiative_id=row["initiative_id"],
+                    user_id=row["user_id"],
+                    score=float(row["score"]),
+                    polygons_submitted=row["polygons_submitted"],
+                    accuracy_pct=float(row["accuracy_pct"]),
+                    place=i + 1,
+                    submitted_at=row.get("submitted_at"),
+                )
+                for i, row in enumerate(rows)
+            ]
+            for entry in entries:
+                self.seen[entry.id] = entry
+            return entries
+
+
+class FakeMlPolygonSetRepository(AbstractMlPolygonSetRepository):
+    def __init__(self) -> None:
+        self._sets: dict[UUID, PolygonSet] = {}
+
+    def add(self, polygon_set: PolygonSet) -> None:
+        self._sets[polygon_set.id] = polygon_set
+
+    def get(self, set_id: UUID) -> PolygonSet | None:
+        return self._sets.get(set_id)
+
+
 class FakeMarketplaceRepository(AbstractMarketplaceRepository):
     def __init__(self) -> None:
         self._listings: dict[UUID, MarketplaceListing] = {}
@@ -605,3 +814,167 @@ class FakeMarketplaceRepository(AbstractMarketplaceRepository):
         listing = self._listings.get(listing_id)
         if listing:
             listing.status = status
+
+
+class FakeLeaderboardRepository(AbstractLeaderboardRepository):
+    def __init__(self) -> None:
+        self._entries: dict[str, LeaderboardEntry] = {}
+
+    def upsert(self, entry: LeaderboardEntry) -> None:
+        key = f"{entry.initiative_id}:{entry.user_id}"
+        existing = self._entries.get(key)
+        if existing:
+            existing.score = entry.score
+            existing.polygons_submitted = entry.polygons_submitted
+            existing.accuracy_pct = entry.accuracy_pct
+            existing.submitted_at = entry.submitted_at
+        else:
+            self._entries[key] = entry
+
+    def get_by_user_and_initiative(self, initiative_id: UUID, user_id: UUID) -> LeaderboardEntry | None:
+        return self._entries.get(f"{initiative_id}:{user_id}")
+
+    def list_by_initiative(self, initiative_id: UUID) -> list[LeaderboardEntry]:
+        result = [e for e in self._entries.values() if e.initiative_id == initiative_id]
+        result.sort(key=lambda e: e.score, reverse=True)
+        for i, e in enumerate(result):
+            e.place = i + 1
+        return result
+
+
+class AbstractValidationRunRepository(ABC):
+    @abstractmethod
+    def add(self, run: ValidationRun) -> None: ...
+
+    @abstractmethod
+    def get(self, run_id: UUID) -> ValidationRun | None: ...
+
+    @abstractmethod
+    def list_by_user(self, user_id: UUID) -> list[ValidationRun]: ...
+
+
+class FakeValidationRunRepository(AbstractValidationRunRepository):
+    def __init__(self) -> None:
+        self._runs: dict[UUID, ValidationRun] = {}
+
+    def add(self, run: ValidationRun) -> None:
+        self._runs[run.id] = run
+
+    def get(self, run_id: UUID) -> ValidationRun | None:
+        return self._runs.get(run_id)
+
+    def list_by_user(self, user_id: UUID) -> list[ValidationRun]:
+        return [r for r in self._runs.values() if r.user_id == user_id]
+
+
+class PostgresValidationRunRepository(AbstractValidationRunRepository):
+    def __init__(self, conn: psycopg2.extensions.connection) -> None:
+        self.conn = conn
+
+    def add(self, run: ValidationRun) -> None:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO validation_runs (id, user_id, polygon_set_id, polygon_count, ambiguous_count, cost_credits, status, imagery_id, region)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (run.id, run.user_id, run.polygon_set_id, run.polygon_count, run.ambiguous_count, run.cost_credits, run.status, run.imagery_id, run.region),
+            )
+
+    def get(self, run_id: UUID) -> ValidationRun | None:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM validation_runs WHERE id = %s", (run_id,))
+            row = cur.fetchone()
+            return self._row_to_run(row) if row else None
+
+    def list_by_user(self, user_id: UUID) -> list[ValidationRun]:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM validation_runs WHERE user_id = %s ORDER BY created_at DESC",
+                (user_id,),
+            )
+            return [self._row_to_run(r) for r in cur.fetchall()]
+
+    @staticmethod
+    def _row_to_run(row: dict) -> ValidationRun:
+        return ValidationRun(
+            id=row["id"],
+            user_id=row["user_id"],
+            polygon_set_id=row["polygon_set_id"],
+            polygon_count=row.get("polygon_count", 0),
+            ambiguous_count=row.get("ambiguous_count", 0),
+            cost_credits=Decimal(str(row.get("cost_credits", 0))),
+            status=row.get("status", "queued"),
+            imagery_id=row.get("imagery_id"),
+            region=row.get("region"),
+            created_at=row.get("created_at"),
+            completed_at=row.get("completed_at"),
+        )
+
+
+class AbstractCreditTransactionRepository(ABC):
+    @abstractmethod
+    def add(self, txn: CreditTransaction) -> None: ...
+
+    @abstractmethod
+    def list_by_user(self, user_id: UUID) -> list[CreditTransaction]: ...
+
+    @abstractmethod
+    def get_total_by_user(self, user_id: UUID) -> Decimal: ...
+
+
+class FakeCreditTransactionRepository(AbstractCreditTransactionRepository):
+    def __init__(self) -> None:
+        self._txns: dict[UUID, CreditTransaction] = {}
+
+    def add(self, txn: CreditTransaction) -> None:
+        self._txns[txn.id] = txn
+
+    def list_by_user(self, user_id: UUID) -> list[CreditTransaction]:
+        return [t for t in self._txns.values() if t.user_id == user_id]
+
+    def get_total_by_user(self, user_id: UUID) -> Decimal:
+        return sum((t.amount for t in self._txns.values() if t.user_id == user_id), Decimal("0"))
+
+
+class PostgresCreditTransactionRepository(AbstractCreditTransactionRepository):
+    def __init__(self, conn: psycopg2.extensions.connection) -> None:
+        self.conn = conn
+
+    def add(self, txn: CreditTransaction) -> None:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO credit_transactions (id, user_id, amount, transaction_type, reference_id, description)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (txn.id, txn.user_id, txn.amount, txn.transaction_type, txn.reference_id, txn.description),
+            )
+
+    def list_by_user(self, user_id: UUID) -> list[CreditTransaction]:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM credit_transactions WHERE user_id = %s ORDER BY created_at DESC",
+                (user_id,),
+            )
+            return [self._row_to_txn(r) for r in cur.fetchall()]
+
+    def get_total_by_user(self, user_id: UUID) -> Decimal:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(SUM(amount), 0) FROM credit_transactions WHERE user_id = %s",
+                (user_id,),
+            )
+            return Decimal(str(cur.fetchone()[0]))
+
+    @staticmethod
+    def _row_to_txn(row: dict) -> CreditTransaction:
+        return CreditTransaction(
+            id=row["id"],
+            user_id=row["user_id"],
+            amount=Decimal(str(row["amount"])),
+            transaction_type=row["transaction_type"],
+            reference_id=row.get("reference_id"),
+            description=row.get("description"),
+            created_at=row.get("created_at"),
+        )

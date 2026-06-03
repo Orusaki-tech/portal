@@ -51,6 +51,24 @@ services:
     depends_on:
       - api
 
+  titiler:
+    build:
+      context: .
+      dockerfile: backend/titiler/Dockerfile
+    container_name: realitysync-titiler
+    environment:
+      DB_HOST: postgis
+      DB_PORT: 5432
+      DB_NAME: realitysync
+      DB_USER: realitysync
+      DB_PASSWORD: realitysync
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgis:
+        condition: service_healthy
+    restart: unless-stopped
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: realitysync-pgadmin

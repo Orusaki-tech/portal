@@ -1,0 +1,4 @@
+id,email,name,role,credits_remaining,created_at,updated_at
+a1b2c3d4-e5f6-7890-abcd-ef1234567890,admin@realitysync.local,Admin User,admin,1000.00,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+b2c3d4e5-f6a7-8901-bcde-f12345678901,annotator@realitysync.local,Annotator User,annotator,500.00,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+c3d4e5f6-a7b8-9012-cdef-123456789012,reviewer@realitysync.local,Reviewer User,reviewer,250.00,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z

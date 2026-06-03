@@ -9,6 +9,8 @@ from backend.engine.adapters.repository import (
 )
 from backend.engine.bootstrap import bootstrap
 from backend.engine.domain.models import (
+    Initiative,
+    InitiativeStatus,
     MarketplaceListing,
     Polygon,
     TaskGrid,
@@ -103,8 +105,9 @@ class TestValidatePolygon:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "validated"
+        assert data["status"] in ("validated", "low_confidence")
         assert data["polygon_id"] == str(seeded_bus._polygon_id)
+        assert 0.0 <= data["confidence"] <= 1.0
 
     def test_validate_missing_grid_fails(self, client: TestClient) -> None:
         response = client.post(
@@ -295,3 +298,198 @@ class TestMarketplace:
         )
         assert response.status_code == 200
         assert response.json()["tokens_paid"] == 30.0
+
+
+class TestInitiatives:
+    def test_list_initiatives_empty(self, client: TestClient) -> None:
+        response = client.get("/api/initiatives")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["items"] == []
+
+    def test_list_initiatives_with_data(self, client: TestClient, seeded_bus: MessageBus) -> None:
+        initiative_id = uuid4()
+        from backend.engine.domain.models import Initiative, InitiativeStatus
+        initiative = Initiative(
+            id=initiative_id,
+            owner_id=seeded_bus._user_id,
+            name="Test Initiative",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE,
+            grid_size_m=100,
+        )
+        seeded_bus.uow.initiative_repo.add(initiative)
+
+        response = client.get("/api/initiatives")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) == 1
+        assert data["items"][0]["name"] == "Test Initiative"
+
+    def test_get_initiative_by_id(self, client: TestClient, seeded_bus: MessageBus) -> None:
+        initiative_id = uuid4()
+        from backend.engine.domain.models import Initiative, InitiativeStatus
+        initiative = Initiative(
+            id=initiative_id,
+            owner_id=seeded_bus._user_id,
+            name="Get Test",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE,
+            grid_size_m=100,
+        )
+        seeded_bus.uow.initiative_repo.add(initiative)
+
+        response = client.get(f"/api/initiatives/{initiative_id}")
+        assert response.status_code == 200
+        assert response.json()["name"] == "Get Test"
+
+    def test_get_initiative_not_found(self, client: TestClient) -> None:
+        response = client.get(f"/api/initiatives/{uuid4()}")
+        assert response.status_code == 404
+
+    def test_update_initiative(self, client: TestClient, seeded_bus: MessageBus) -> None:
+        initiative_id = uuid4()
+        from backend.engine.domain.models import Initiative, InitiativeStatus
+        initiative = Initiative(
+            id=initiative_id,
+            owner_id=seeded_bus._user_id,
+            name="Original",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE,
+            grid_size_m=100,
+        )
+        seeded_bus.uow.initiative_repo.add(initiative)
+
+        response = client.put(
+            f"/api/initiatives/{initiative_id}",
+            json={"name": "Updated Name"},
+        )
+        assert response.status_code == 200
+        updated = seeded_bus.uow.initiative_repo.get(initiative_id)
+        assert updated is not None
+        assert updated.name == "Updated Name"
+
+    def test_delete_initiative(self, client: TestClient, seeded_bus: MessageBus) -> None:
+        initiative_id = uuid4()
+        from backend.engine.domain.models import Initiative, InitiativeStatus
+        initiative = Initiative(
+            id=initiative_id,
+            owner_id=seeded_bus._user_id,
+            name="To Delete",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE,
+            grid_size_m=100,
+        )
+        seeded_bus.uow.initiative_repo.add(initiative)
+
+        response = client.delete(f"/api/initiatives/{initiative_id}")
+        assert response.status_code == 204
+        archived = seeded_bus.uow.initiative_repo.get(initiative_id)
+        assert archived is not None
+        assert archived.status.value == "archived"
+
+    def test_list_initiative_grids(self, client: TestClient, seeded_bus: MessageBus) -> None:
+        initiative_id = uuid4()
+        grid = TaskGrid(
+            id=uuid4(), initiative_id=initiative_id,
+            geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+        )
+        seeded_bus.uow.grid_repo.add(grid)
+
+        response = client.get(f"/api/initiatives/{initiative_id}/grids")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert data["items"][0]["grid_id"] == str(grid.id)
+
+
+class TestPolygons:
+    def test_list_polygons_no_filter(self, client: TestClient, seeded_bus: MessageBus) -> None:
+        response = client.post("/api/polygons/list", json={})
+        assert response.status_code == 200
+        data = response.json()
+        assert "items" in data
+        assert data["page"] == 1
+        assert data["per_page"] == 50
+
+
+class TestHackathons:
+    def test_join_hackathon(self, client: TestClient, seeded_bus: MessageBus) -> None:
+        initiative_id = uuid4()
+        initiative = Initiative(
+            id=initiative_id, owner_id=seeded_bus._user_id, name="Hackathon",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE, hackathon_mode=True,
+        )
+        seeded_bus.uow.initiative_repo.add(initiative)
+
+        response = client.post("/api/hackathons/join", json={
+            "initiative_id": str(initiative_id),
+            "user_id": str(seeded_bus._user_id),
+        })
+        assert response.status_code == 200
+        assert response.json()["status"] == "joined"
+
+    def test_join_non_hackathon_raises(self, client: TestClient, seeded_bus: MessageBus) -> None:
+        initiative_id = uuid4()
+        initiative = Initiative(
+            id=initiative_id, owner_id=seeded_bus._user_id, name="Normal",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE, hackathon_mode=False,
+        )
+        seeded_bus.uow.initiative_repo.add(initiative)
+
+        response = client.post("/api/hackathons/join", json={
+            "initiative_id": str(initiative_id),
+            "user_id": str(seeded_bus._user_id),
+        })
+        assert response.status_code == 400
+
+    def test_submit_hackathon_result(self, client: TestClient, seeded_bus: MessageBus) -> None:
+        initiative_id = uuid4()
+        initiative = Initiative(
+            id=initiative_id, owner_id=seeded_bus._user_id, name="Hackathon",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE, hackathon_mode=True,
+        )
+        seeded_bus.uow.initiative_repo.add(initiative)
+        # Join first
+        client.post("/api/hackathons/join", json={
+            "initiative_id": str(initiative_id),
+            "user_id": str(seeded_bus._user_id),
+        })
+
+        response = client.post("/api/hackathons/submit", json={
+            "initiative_id": str(initiative_id),
+            "user_id": str(seeded_bus._user_id),
+            "score": 92.5,
+            "accuracy_pct": 0.94,
+        })
+        assert response.status_code == 200
+        assert response.json()["status"] == "submitted"
+
+    def test_get_leaderboard(self, client: TestClient, seeded_bus: MessageBus) -> None:
+        initiative_id = uuid4()
+        initiative = Initiative(
+            id=initiative_id, owner_id=seeded_bus._user_id, name="Hackathon",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            status=InitiativeStatus.ACTIVE, hackathon_mode=True,
+        )
+        seeded_bus.uow.initiative_repo.add(initiative)
+        client.post("/api/hackathons/join", json={
+            "initiative_id": str(initiative_id),
+            "user_id": str(seeded_bus._user_id),
+        })
+        client.post("/api/hackathons/submit", json={
+            "initiative_id": str(initiative_id),
+            "user_id": str(seeded_bus._user_id),
+            "score": 85.0,
+            "accuracy_pct": 0.90,
+        })
+
+        response = client.get(f"/api/hackathons/{initiative_id}/leaderboard")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert data["items"][0]["score"] == 85.0
+        assert data["items"][0]["place"] == 1

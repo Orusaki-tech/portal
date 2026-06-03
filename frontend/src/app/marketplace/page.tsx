@@ -1,24 +1,37 @@
 "use client"
 
-import { useState } from "react"
-import { createListing, purchaseListing, topUpCredits } from "@/lib/api"
+import { useEffect, useState } from "react"
+import { createListing, getListings, purchaseListing } from "@/lib/api"
+import type { MarketplaceListingResponse } from "@/types/api"
 
 export default function MarketplacePage() {
   const [status, setStatus] = useState("")
-  const [listings, setListings] = useState<
-    { listing_id: string; title: string; price_tokens: number; geometry_count: number; status: string }[]
-  >([])
+  const [loading, setLoading] = useState(true)
+  const [listings, setListings] = useState<MarketplaceListingResponse[]>([])
 
-  // Mock user ID for demo
-  const userId = "00000000-0000-0000-0000-000000000001"
+  useEffect(() => {
+    getListings()
+      .then((data) => setListings(data.listings))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  const currentUserId = () => {
+    if (typeof window === "undefined") return ""
+    return JSON.parse(localStorage.getItem("realitysync_user") || "{}").user_id || ""
+  }
 
   const handleCreateListing = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    const userId = currentUserId()
+    if (!userId) { setStatus("Please log in first"); return }
     const fd = new FormData(e.currentTarget)
+    const datasetId = (fd.get("datasetId") as string)?.trim()
+    if (!datasetId) { setStatus("Dataset ID is required"); return }
     try {
       const result = await createListing(
         userId,
-        crypto.randomUUID(),
+        datasetId,
         fd.get("title") as string,
         Number(fd.get("price")),
         Number(fd.get("geomCount")),
@@ -26,7 +39,7 @@ export default function MarketplacePage() {
       setStatus(`Listed: ${result.title}`)
       setListings((prev) => [
         ...prev,
-        { listing_id: result.listing_id, title: result.title, price_tokens: result.price_tokens, geometry_count: Number(fd.get("geomCount")), status: "active" },
+        { listing_id: result.listing_id, title: result.title, price_tokens: result.price_tokens, geometry_count: Number(fd.get("geomCount")), status: "active", seller_id: userId, dataset_id: datasetId, description: null, created_at: null },
       ])
     } catch (err) {
       setStatus(`Error: ${err instanceof Error ? err.message : "Unknown"}`)
@@ -34,6 +47,8 @@ export default function MarketplacePage() {
   }
 
   const handlePurchase = async (listingId: string) => {
+    const userId = currentUserId()
+    if (!userId) { setStatus("Please log in first"); return }
     try {
       const result = await purchaseListing(listingId, userId)
       setStatus(`Purchased — dataset ${result.dataset_id.slice(0, 8)} for ${result.tokens_paid} tokens`)
@@ -54,6 +69,7 @@ export default function MarketplacePage() {
         <h2 className="mb-3 text-lg font-semibold">List a Dataset</h2>
         <form onSubmit={handleCreateListing} className="flex flex-wrap gap-3">
           <input name="title" placeholder="Dataset title" required className="rounded border border-gray-300 px-3 py-2 text-sm" />
+          <input name="datasetId" placeholder="Dataset ID (UUID)" required className="rounded border border-gray-300 px-3 py-2 text-sm font-mono text-xs" />
           <input name="price" type="number" step="0.01" placeholder="Price (tokens)" required className="w-32 rounded border border-gray-300 px-3 py-2 text-sm" />
           <input name="geomCount" type="number" placeholder="Geometry count" defaultValue={0} className="w-32 rounded border border-gray-300 px-3 py-2 text-sm" />
           <button type="submit" className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700">
@@ -63,7 +79,11 @@ export default function MarketplacePage() {
       </div>
 
       <h2 className="mb-3 text-lg font-semibold">Active Listings</h2>
-      {listings.length === 0 ? (
+      {loading ? (
+        <div className="rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
+          <p className="text-gray-500">Loading listings...</p>
+        </div>
+      ) : listings.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
           <p className="text-gray-500">No listings yet. Create one above.</p>
         </div>
@@ -77,7 +97,7 @@ export default function MarketplacePage() {
               {l.status === "active" && (
                 <button
                   onClick={() => handlePurchase(l.listing_id)}
-                  className="mt-3 w-full rounded bg-green-600 px-3 py-2 text-sm text-white hover:bg-green-700"
+                  className="mt-3 w-full rounded bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
                 >
                   Purchase
                 </button>

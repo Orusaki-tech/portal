@@ -123,6 +123,8 @@ class TestTaskGrid:
             id=uuid4(), initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
+        grid.lock(uuid4())
+        grid.submit_review()
         grid.complete()
         with pytest.raises(ValueError):
             grid.lock(uuid4())
@@ -168,6 +170,8 @@ class TestTaskGrid:
             id=uuid4(), initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
+        grid.lock(uuid4())
+        grid.submit_review()
         grid.dispute("Boundary does not match imagery")
         assert grid.status == GridStatus.DISPUTED
         assert grid.review_notes == "Boundary does not match imagery"

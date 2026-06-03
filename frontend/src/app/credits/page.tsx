@@ -1,15 +1,26 @@
 "use client"
 
-import { useState } from "react"
-import { topUpCredits } from "@/lib/api"
+import { useEffect, useState } from "react"
+import { topUpCredits, fetchCredits } from "@/lib/api"
 
 export default function CreditsPage() {
   const [status, setStatus] = useState("")
   const [balance, setBalance] = useState<number | null>(null)
-  const userId = "00000000-0000-0000-0000-000000000001"
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const userId = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("realitysync_user") || "{}").user_id : ""
+    if (!userId) { setLoading(false); return }
+    fetchCredits(userId)
+      .then((data) => setBalance(data.credits_remaining))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
 
   const handleTopUp = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    const userId = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("realitysync_user") || "{}").user_id : ""
+    if (!userId) { setStatus("Please log in first"); return }
     const fd = new FormData(e.currentTarget)
     try {
       const result = await topUpCredits(userId, Number(fd.get("amount")))

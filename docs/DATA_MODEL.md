@@ -11,15 +11,14 @@
 │ name         │  │    │ name             │  │    │ name              │
 │ role         │  │    │ model_version    │  │    │ description       │
 │ credits_remain│  │    │ description      │  │    │ region (GEOM)     │
-│ created_at   │  │    │ created_at       │  │    │ status            │
-│ updated_at   │  │    └──────────────────┘  │    │ grid_size_m       │
-└──────────────┘  │    └──────────────────┘  │    │ budget_credits    │
-                  │                          │    │ created_at        │
-                  │    ┌──────────────┐      │    │ completed_at      │
-                  │    │ ml_polygons  │      │    └───────────────────┘
-                  │    ├──────────────┤      │           │
-                  └────│ id (PK)     │      │           │
-                       │ polygon_set_id│────┘           │
+│ subscription_ │  │    │ created_at       │  │    │ status            │
+│   tier       │  │    └──────────────────┘  │    │ grid_size_m       │
+│ api_key      │  │                          │    │ budget_credits    │
+│ created_at   │  │    ┌──────────────┐      │    │ hackathon_mode    │
+│ updated_at   │  │    │ ml_polygons  │      │    │ max_participants  │
+└──────────────┘  │    ├──────────────┤      │    │ created_at        │
+                  └────│ id (PK)     │      │    │ completed_at      │
+                       │ polygon_set_id│────┘    └───────────────────┘
                        │ original_geom (POLYGON)        │
                        │ qa_status    │                 │
                        │ confidence_avg│                │
@@ -51,36 +50,62 @@
                                     │ id (PK)          ││
                                     │ user_id(FK)──────┘│
                                     │ polygon_set_id(FK)│
-                                    │ imagery_id(FK)────┘
-                                    │ region (GEOM)     │
-                                    │ status            │
-                                    │ polygon_count     │
-                                    │ ambiguous_count   │
-                                    │ cost_credits      │
-                                    │ created_at        │
-                                    │ completed_at      │
+                                    │ polygon_count   ││
+                                    │ cost_credits    ││
+                                    │ status          ││
+                                    │ created_at      ││
+                                    │ completed_at    ││
                                     └──────────────────┘
 
-┌─────────────────────────┐
-│   map_task_grid         │
-├─────────────────────────┤
-│ grid_id (PK)            │
-│ initiative_id(FK)───────┤
-│ geometry (POLYGON)      │
-│ status                  │
-│ assigned_user_id(FK)────┤
-│ locked_at               │
-│ completed_at            │
-│ review_notes            │
+┌─────────────────────────┐         ┌───────────────────────────────┐
+│   map_task_grid         │         │   credit_transactions         │
+├─────────────────────────┤         ├───────────────────────────────┤
+│ grid_id (PK)            │         │ id (PK)                      │
+│ initiative_id(FK)───────┤         │ user_id (FK)─────────────────┤
+│ geometry (POLYGON)      │         │ amount (Decimal)             │
+│ status                  │         │ transaction_type             │
+│ assigned_user_id(FK)────┤         │ reference_id (UUID?)         │
+│ locked_at               │         │ description (text?)          │
+│ completed_at            │         │ created_at                   │
+│ review_notes            │         └───────────────────────────────┘
 └─────────────────────────┘
 
-┌───────────────────────────────┐
-│ initiative_participants       │
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│ initiative_participants       │   │      export_jobs              │
+├───────────────────────────────┤   ├───────────────────────────────┤
+│ initiative_id (FK) (COMPOSITE │   │ export_id (PK)               │
+│ user_id (FK)     │  PK)      │   │ user_id (FK)─────────────────┤
+│ role                        │   │ export_format                │
+│ joined_at                   │   │ source_type                  │
+└───────────────────────────────┘   │ source_id                    │
+                                    │ status                       │
+┌───────────────────────────────┐   │ output_url (text?)           │
+│ marketplace_listings          │   │ error_message (text?)        │
+├───────────────────────────────┤   │ export_params (JSONB?)       │
+│ listing_id (PK)              │   │ created_at                   │
+│ seller_id (FK)───────────────┤   │ completed_at                 │
+│ dataset_id (FK)──────────────┤   └───────────────────────────────┘
+│ title                        │
+│ price_tokens (Decimal)       │   ┌───────────────────────────────┐
+│ geometry_count               │   │ dataset_purchases            │
+│ quality_score (real?)        │   ├───────────────────────────────┤
+│ completion_rate (real?)      │   │ purchase_id (PK)             │
+│ description (text?)          │   │ listing_id (FK)──────────────┤
+│ status                       │   │ buyer_id (FK)────────────────┤
+│ created_at                   │   │ dataset_id (FK)──────────────┤
+└───────────────────────────────┘   │ tokens_paid (Decimal)        │
+                                    │ purchased_at                 │
+┌───────────────────────────────┐   └───────────────────────────────┘
+│ hackathon_leaderboard        │
 ├───────────────────────────────┤
-│ initiative_id (FK) (COMPOSITE │
-│ user_id (FK)     │  PK)      │
-│ role                        │
-│ joined_at                   │
+│ id (PK)                      │
+│ initiative_id (FK)───────────┤
+│ user_id (FK)─────────────────┤
+│ score (real)                 │
+│ polygons_submitted (int)     │
+│ accuracy_pct (real)          │
+│ place (int?)                 │
+│ submitted_at                 │
 └───────────────────────────────┘
 ```
 
@@ -95,8 +120,10 @@
 | `id` | `uuid` | `PK DEFAULT gen_random_uuid()` | |
 | `email` | `varchar(255)` | `NOT NULL UNIQUE` | Used for auth + notifications |
 | `name` | `varchar(255)` | `NOT NULL` | Display name |
-| `role` | `varchar(20)` | `NOT NULL CHECK (role IN ('admin','manager','annotator','reviewer'))` | |
+| `role` | `varchar(20)` | `NOT NULL CHECK (role IN ('admin','manager','annotator','reviewer','senior_reviewer','viewer'))` | |
 | `credits_remaining` | `decimal(12,2)` | `NOT NULL DEFAULT 0 CHECK (credits_remaining >= 0)` | Invariant: must never be negative |
+| `subscription_tier` | `varchar(20)` | `NOT NULL DEFAULT 'free' CHECK (IN ('free','starter','professional'))` | |
+| `api_key` | `varchar(64)` | `UNIQUE` | API key for programmatic access |
 | `created_at` | `timestamptz` | `NOT NULL DEFAULT now()` | |
 | `updated_at` | `timestamptz` | `NOT NULL DEFAULT now()` | |
 
@@ -184,6 +211,8 @@
 | `status` | `varchar(20)` | `NOT NULL DEFAULT 'draft' CHECK (IN ('draft','active','paused','complete','archived'))` | |
 | `grid_size_m` | `int` | `NOT NULL DEFAULT 1000` | Grid block size in meters |
 | `budget_credits` | `decimal(12,2)` | | Pre-allocated credits |
+| `hackathon_mode` | `boolean` | `NOT NULL DEFAULT false` | Enables leaderboard + scoring |
+| `max_participants` | `int` | | Cap on hackathon participants |
 | `created_at` | `timestamptz` | `NOT NULL DEFAULT now()` | |
 | `completed_at` | `timestamptz` | | |
 
@@ -248,14 +277,101 @@
 | `id` | `uuid` | `PK DEFAULT gen_random_uuid()` | |
 | `user_id` | `uuid` | `NOT NULL REFERENCES users(id)` | Requestor |
 | `polygon_set_id` | `uuid` | `REFERENCES ml_polygon_sets(id)` | |
-| `imagery_id` | `uuid` | `REFERENCES user_imagery(id)` | Optional custom imagery |
-| `region` | `geometry(Geometry,4326)` | | Extent of this run |
-| `status` | `varchar(20)` | `NOT NULL DEFAULT 'queued' CHECK (IN ('queued','processing','complete','failed'))` | |
 | `polygon_count` | `int` | `DEFAULT 0` | |
-| `ambiguous_count` | `int` | `DEFAULT 0` | |
 | `cost_credits` | `decimal(12,2)` | `DEFAULT 0` | Credits consumed |
+| `status` | `varchar(20)` | `NOT NULL DEFAULT 'queued' CHECK (IN ('queued','processing','complete','failed'))` | |
 | `created_at` | `timestamptz` | `NOT NULL DEFAULT now()` | |
 | `completed_at` | `timestamptz` | | |
+
+---
+
+### `credit_transactions`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `uuid` | `PK DEFAULT gen_random_uuid()` | |
+| `user_id` | `uuid` | `NOT NULL REFERENCES users(id)` | |
+| `amount` | `decimal(12,2)` | `NOT NULL` | Positive = top-up, negative = spend |
+| `transaction_type` | `varchar(20)` | `NOT NULL CHECK (IN ('top_up','validation','correction','purchase','refund'))` | |
+| `reference_id` | `uuid` | | Links to related entity |
+| `description` | `text` | | |
+| `created_at` | `timestamptz` | `NOT NULL DEFAULT now()` | |
+
+**Indexes:** `(user_id, created_at DESC)`
+
+---
+
+### `export_jobs`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `export_id` | `uuid` | `PK DEFAULT gen_random_uuid()` | |
+| `user_id` | `uuid` | `NOT NULL REFERENCES users(id)` | |
+| `export_format` | `varchar(20)` | `NOT NULL CHECK (IN ('geojson','coco','yolo','pascal_voc','tfrecord','parquet','geopackage'))` | |
+| `source_type` | `varchar(20)` | `NOT NULL CHECK (IN ('dataset','initiative','grid'))` | |
+| `source_id` | `uuid` | `NOT NULL` | |
+| `status` | `varchar(20)` | `NOT NULL DEFAULT 'pending' CHECK (IN ('pending','processing','complete','failed'))` | |
+| `output_url` | `text` | | |
+| `error_message` | `text` | | |
+| `export_params` | `jsonb` | `DEFAULT '{}'` | Filter params: qa_status, confidence_min/max, include_original |
+| `created_at` | `timestamptz` | `NOT NULL DEFAULT now()` | |
+| `completed_at` | `timestamptz` | | |
+
+**Indexes:** `(user_id, created_at DESC)`, `(status)`
+
+---
+
+### `marketplace_listings`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `listing_id` | `uuid` | `PK DEFAULT gen_random_uuid()` | |
+| `seller_id` | `uuid` | `NOT NULL REFERENCES users(id)` | |
+| `dataset_id` | `uuid` | `NOT NULL REFERENCES ml_polygon_sets(id)` | |
+| `title` | `varchar(255)` | `NOT NULL` | |
+| `price_tokens` | `decimal(12,2)` | `NOT NULL CHECK (price_tokens >= 0)` | |
+| `geometry_count` | `int` | `NOT NULL DEFAULT 0` | |
+| `quality_score` | `real` | | Computed from polygon confidence |
+| `completion_rate` | `real` | | Computed from polygon validation status |
+| `description` | `text` | | |
+| `status` | `varchar(20)` | `NOT NULL DEFAULT 'active' CHECK (IN ('active','sold','archived'))` | |
+| `created_at` | `timestamptz` | `NOT NULL DEFAULT now()` | |
+
+**Indexes:** `(seller_id)`, `(status)`
+
+---
+
+### `dataset_purchases`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `purchase_id` | `uuid` | `PK DEFAULT gen_random_uuid()` | |
+| `listing_id` | `uuid` | `NOT NULL REFERENCES marketplace_listings(listing_id)` | |
+| `buyer_id` | `uuid` | `NOT NULL REFERENCES users(id)` | |
+| `dataset_id` | `uuid` | `NOT NULL REFERENCES ml_polygon_sets(id)` | |
+| `tokens_paid` | `decimal(12,2)` | `NOT NULL` | |
+| `purchased_at` | `timestamptz` | `NOT NULL DEFAULT now()` | |
+
+**Indexes:** `(buyer_id)`, `(listing_id)`
+
+---
+
+### `hackathon_leaderboard`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `uuid` | `PK DEFAULT gen_random_uuid()` | |
+| `initiative_id` | `uuid` | `NOT NULL REFERENCES initiatives(id)` | |
+| `user_id` | `uuid` | `NOT NULL REFERENCES users(id)` | |
+| `score` | `real` | `NOT NULL DEFAULT 0 CHECK (score >= 0 AND score <= 1.0)` | |
+| `polygons_submitted` | `int` | `NOT NULL DEFAULT 0` | |
+| `accuracy_pct` | `real` | `NOT NULL DEFAULT 0 CHECK (accuracy_pct >= 0 AND accuracy_pct <= 100.0)` | |
+| `place` | `int` | | Computed rank |
+| `submitted_at` | `timestamptz` | | |
+
+**Indexes:** `UNIQUE (initiative_id, user_id)`, `(initiative_id, score DESC)`
+
+---
 
 **Indexes:** `(user_id, created_at DESC)`, `(status)`
 
@@ -270,6 +386,10 @@
 | Polygons by QA status | `ml_polygons.qa_status` | B-tree |
 | Grid blocks for an initiative | `map_task_grid.initiative_id` | B-tree |
 | User's active validations | `validation_runs.user_id` | B-tree |
+| Credit history for a user | `credit_transactions.user_id` | B-tree |
+| Export jobs for a user | `export_jobs.user_id` | B-tree |
+| Active marketplace listings | `marketplace_listings.status` | B-tree |
+| Hackathon leaderboard ranking | `hackathon_leaderboard.initiative_id + score` | Composite B-tree |
 | Spatial intersection (any geometry column) | All geometry columns | GIST |
 | Initiative progress heatmap | `map_task_grid.initiative_id + status` | Composite B-tree |
 
