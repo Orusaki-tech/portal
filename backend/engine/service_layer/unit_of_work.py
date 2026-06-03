@@ -49,8 +49,7 @@ class UnitOfWork(Protocol):
     def rollback(self) -> None: ...
     def collect_events(self) -> list[Any]: ...
 
-    @property
-    def events(self) -> list[Any]: ...
+    events: list[Any]
 
 
 class FakeUnitOfWork:
@@ -124,7 +123,6 @@ class FakeUnitOfWork:
         return events
 
     @property
-    @property
     def events(self) -> list[Any]:
         return self._events
 
@@ -193,7 +191,6 @@ class PostgresUnitOfWork:
                 entry.clear_events()
         return events
 
-    @property
     @property
     def events(self) -> list[Any]:
         return self._events
