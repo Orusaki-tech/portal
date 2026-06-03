@@ -32,7 +32,7 @@ echo "7. Auto-fixing ruff issues..."
 ruff check --fix && ruff format
 
 echo ""
-echo "8. Running linter (should be clean)..."
+echo "8. Running linter (must be clean)..."
 make lint
 
 echo ""
@@ -40,16 +40,16 @@ echo "9. Installing mypy type stubs..."
 python -m pip install types-PyYAML types-psycopg2
 
 echo ""
-echo "10. Running typechecker (known ~230 errors — pre-existing, not regressions)..."
+echo "10. Running typechecker (pre-existing errors only — not a regression)..."
 make typecheck || true
 
 echo ""
-echo "11. Running unit tests (all 75 pass)..."
-python -m pytest tests/unit/ -v || true
+echo "11. Running unit tests (all 75 must pass)..."
+python -m pytest tests/unit/ -v --tb=short
 
 echo ""
-echo "12. Running smoke test..."
-bash scripts/smoke-test.sh || true
+echo "12. Running smoke test (E2E against Docker)..."
+bash scripts/smoke-test.sh
 
 echo ""
 echo "=== Done! Open http://localhost:3000 ==="

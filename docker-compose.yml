@@ -28,7 +28,7 @@ services:
       DB_USER: realitysync
       DB_PASSWORD: realitysync
     ports:
-      - "8000:8000"
+      - "8000:8080"
     depends_on:
       postgis:
         condition: service_healthy
