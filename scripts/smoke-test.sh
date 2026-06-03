@@ -29,7 +29,7 @@ echo ""
 
 # 1. Health check
 echo "1. Health check"
-HEALTH=$(curl -sf http://localhost:8000/health 2>&1 || true)
+HEALTH=$(curl -sf http://localhost:8000/health 2>&1) || true
 if echo "$HEALTH" | grep -q "ok"; then
     pass "health endpoint"
 else
@@ -42,7 +42,7 @@ REG=""
 for i in $(seq 1 5); do
     REG=$(curl -sf -X POST "${API_BASE}/auth/register" \
         -H "Content-Type: application/json" \
-        -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\",\"name\":\"Smoke Tester\"}" 2>&1 || true)
+        -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\",\"name\":\"Smoke Tester\"}" 2>&1) || true
     if echo "$REG" | grep -q "user_id"; then
         break
     fi
@@ -59,7 +59,7 @@ fi
 echo "3. Login"
 LOGIN=$(curl -sf -X POST "${API_BASE}/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\"}" 2>&1 || true)
+    -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\"}" 2>&1) || true
 if echo "$LOGIN" | grep -q "token"; then
     TOKEN=$(echo "$LOGIN" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
     pass "login"
@@ -77,7 +77,7 @@ echo "4. Upload dataset"
 UPLOAD=$(curl -sf -X POST "${API_BASE}/datasets" \
     -H "${AUTH}" \
     -H "Content-Type: application/json" \
-    -d '{"name":"Smoke Dataset","polygons":[{"geometry":"POLYGON((-97.734 30.267,-97.733 30.267,-97.733 30.268,-97.734 30.268,-97.734 30.267))","properties":{}}]}' 2>&1 || true)
+    -d '{"name":"Smoke Dataset","polygons":[{"geometry":"POLYGON((-97.734 30.267,-97.733 30.267,-97.733 30.268,-97.734 30.268,-97.734 30.267))","properties":{}}]}' 2>&1) || true
 if echo "$UPLOAD" | grep -q "set_id"; then
     SET_ID=$(echo "$UPLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['set_id'])")
     pass "upload dataset"
@@ -91,7 +91,7 @@ if [ -n "$SET_ID" ]; then
     VALIDATE=$(curl -sf -X POST "${API_BASE}/validate" \
         -H "${AUTH}" \
         -H "Content-Type: application/json" \
-        -d "{\"polygon_set_id\":\"${SET_ID}\"}" 2>&1 || true)
+        -d "{\"polygon_set_id\":\"${SET_ID}\"}" 2>&1) || true
     if echo "$VALIDATE" | grep -q "run_id"; then
         pass "validate polygon"
     else
@@ -104,7 +104,7 @@ fi
 # 6. List triage
 echo "6. List triage"
 TRIAGE=$(curl -sf "${API_BASE}/triage" \
-    -H "${AUTH}" 2>&1 || true)
+    -H "${AUTH}" 2>&1) || true
 if echo "$TRIAGE" | grep -qE "\[|\"polygons\""; then
     pass "list triage"
 else
@@ -117,7 +117,7 @@ if [ -n "$SET_ID" ]; then
     EXPORT=$(curl -sf -X POST "${API_BASE}/exports" \
         -H "${AUTH}" \
         -H "Content-Type: application/json" \
-        -d "{\"format\":\"geojson\",\"source_type\":\"dataset\",\"source_id\":\"${SET_ID}\"}" 2>&1 || true)
+        -d "{\"format\":\"geojson\",\"source_type\":\"dataset\",\"source_id\":\"${SET_ID}\"}" 2>&1) || true
     if echo "$EXPORT" | grep -q "export_id"; then
         pass "request export"
     else
