@@ -1,17 +1,16 @@
-.PHONY: venv install docker-up docker-down migrate test lint typecheck clean
+.PHONY: venv install docker-up docker-down migrate test lint typecheck pre-commit-install pre-commit-run clean
 
-VENV = .venv
-PYTHON = $(VENV)/bin/python
-PIP = $(VENV)/bin/pip
+PYTHON ?= python3
+PIP ?= pip3
 
 # Virtual environment
 venv:
-	python3 -m venv $(VENV)
-	$(PIP) install --upgrade pip
-	$(PIP) install -e ".[dev]"
+	python3 -m venv .venv
+	.venv/bin/pip install --upgrade pip
+	.venv/bin/pip install -e ".[dev]"
 
 install:
-	$(PIP) install -e ".[dev]"
+	pip3 install -e ".[dev]"
 
 # Docker
 docker-up:
@@ -55,13 +54,13 @@ test-cov:
 	$(PYTHON) -m pytest --cov --cov-report=term-missing
 
 lint:
-	$(VENV)/bin/ruff check .
+	ruff check .
 
 lint-fix:
-	$(VENV)/bin/ruff check --fix .
+	ruff check --fix .
 
 typecheck:
-	$(VENV)/bin/mypy backend/
+	mypy backend/
 
 pre-commit-install:
 	$(VENV)/bin/pre-commit install

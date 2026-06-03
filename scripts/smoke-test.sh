@@ -36,7 +36,7 @@ fi
 
 # 2. Register
 echo "2. Register"
-REG=$(curl -sf -X POST "${API_BASE}/register" \
+REG=$(curl -sf -X POST "${API_BASE}/auth/register" \
     -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\",\"name\":\"Smoke Tester\"}" 2>&1 || true)
 if echo "$REG" | grep -q "user_id"; then
@@ -47,7 +47,7 @@ fi
 
 # 3. Login
 echo "3. Login"
-LOGIN=$(curl -sf -X POST "${API_BASE}/login" \
+LOGIN=$(curl -sf -X POST "${API_BASE}/auth/login" \
     -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\"}" 2>&1 || true)
 if echo "$LOGIN" | grep -q "token"; then
@@ -57,7 +57,10 @@ else
     fail "login" "$LOGIN"
 fi
 
-AUTH="Authorization: Bearer ${TOKEN}"
+AUTH=""
+if [ -n "${TOKEN:-}" ]; then
+    AUTH="Authorization: Bearer ${TOKEN}"
+fi
 
 # 4. Upload dataset (polygon set)
 echo "4. Upload dataset"
