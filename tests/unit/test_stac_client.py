@@ -21,8 +21,8 @@ def test_stac_client_returns_naip_for_austin_area() -> None:
     )
     result = client.find_best_imagery_for_polygon(AUSTIN_BUILDING)
     assert result is not None, "Expected to find NAIP imagery for Austin, TX area"
-    assert "naip" in result.lower() or "naip" in str(result).lower(), (
-        f"Expected NAIP collection, got {result}"
+    assert result.startswith("naip/"), (
+        f"Expected NAIP collection item, got {result}"
     )
 
 

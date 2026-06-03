@@ -26,4 +26,4 @@ class PystacClient(AbstractStacClient):
         items = list(search.items())
         if not items:
             return None
-        return str(items[0].id)
+        return f"{items[0].collection_id}/{items[0].id}"

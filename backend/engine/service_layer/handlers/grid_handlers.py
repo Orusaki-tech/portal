@@ -19,6 +19,7 @@ from backend.engine.domain.commands import (
     SubmitGridBlock,
 )
 from backend.engine.domain.events import (
+    BoundaryCorrected,
     GridBlockCompleted,
     GridBlockDisputed,
     GridBlockLocked,
@@ -198,10 +199,10 @@ def handle_generate_grid_blocks(
 
 
 def handle_check_grid_complete(
-    event: GridBlockCompleted, uow: UnitOfWork
+    event: BoundaryCorrected, uow: UnitOfWork
 ) -> None:
     logger.info(
-        f"Checking if grid is complete after polygon {event.grid_id} correction"
+        f"Checking if grid is complete after polygon {event.polygon_id} correction"
     )
 
 

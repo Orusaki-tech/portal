@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from backend.engine.domain.commands import CorrectBoundary, UploadPolygonSet, ValidatePolygon
 from backend.engine.domain.events import BoundaryCorrected, ConsensusReached, GridBlockCompleted, PolygonValidated
-from backend.engine.domain.models import Correction, QaStatus, Polygon, PolygonSet, TaskGrid, User
+from backend.engine.domain.models import Correction, CreditTransaction, QaStatus, Polygon, PolygonSet, TaskGrid, User
 from backend.engine.service_layer.edge_service import validate_polygon
 from backend.engine.service_layer.unit_of_work import UnitOfWork
 
