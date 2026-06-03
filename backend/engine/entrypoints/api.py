@@ -13,7 +13,7 @@ import sentry_sdk
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.engine.adapters.repository import PostgresUserRepository
 from backend.engine.bootstrap import bootstrap
@@ -391,13 +391,13 @@ PRESET_IMAGERY_SOURCES = [
 
 
 class StacQueryRequest(BaseModel):
-    stacUrl: str
+    stac_url: str = Field(alias="stacUrl")
     collection: str
     bbox: list[float] | None = None
     geometry: dict[str, Any] | None = None
     datetime: str | None = None
-    maxItems: int = 10
-    authToken: str | None = None
+    max_items: int = Field(default=10, alias="maxItems")
+    auth_token: str | None = Field(default=None, alias="authToken")
 
 
 class ValidateGeometriesRequest(BaseModel):
@@ -406,9 +406,9 @@ class ValidateGeometriesRequest(BaseModel):
 
 class BatchValidateRequest(BaseModel):
     geometries: list[str]
-    imagerySource: str
-    userId: UUID
-    datasetName: str
+    imagery_source: str = Field(alias="imagerySource")
+    user_id: UUID = Field(alias="userId")
+    dataset_name: str = Field(alias="datasetName")
 
 
 # ---------------------------------------------------------------------------
@@ -1359,12 +1359,12 @@ async def stac_query(body: StacQueryRequest, request: Request) -> Any:
     import httpx
 
     headers = {"Content-Type": "application/json"}
-    if body.authToken:
-        headers["Authorization"] = f"Bearer {body.authToken}"
+    if body.auth_token:
+        headers["Authorization"] = f"Bearer {body.auth_token}"
 
     search_params: dict[str, Any] = {
         "collections": [body.collection],
-        "max_items": body.maxItems,
+        "max_items": body.max_items,
     }
 
     if body.bbox:
@@ -1374,7 +1374,7 @@ async def stac_query(body: StacQueryRequest, request: Request) -> Any:
     if body.datetime:
         search_params["datetime"] = body.datetime
 
-    stac_url = body.stacUrl.rstrip("/")
+    stac_url = body.stac_url.rstrip("/")
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -1448,8 +1448,7 @@ async def stac_query(body: StacQueryRequest, request: Request) -> Any:
 async def validate_geometries(body: ValidateGeometriesRequest, request: Request) -> Any:
     """Server-side geometry validation using Shapely."""
     try:
-        from shapely.geometry import Polygon as ShapelyPolygon
-        from shapely import wkt, is_valid, is_simple, explain_validity
+        from shapely import explain_validity, is_simple, is_valid, wkt
     except ImportError:
         raise HTTPException(status_code=500, detail="Shapely not available")
 
@@ -1500,7 +1499,7 @@ async def validate_geometries(body: ValidateGeometriesRequest, request: Request)
             for poly in geom.geoms:
                 if not poly.exterior.is_ccw:
                     has_wrong_orientation = True
-                    warnings.append(f"Exterior ring orientation warning in polygon")
+                    warnings.append("Exterior ring orientation warning in polygon")
 
         try:
             area = geom.area
@@ -1563,8 +1562,8 @@ async def batch_validate(
     from uuid import uuid4
 
     command = UploadPolygonSet(
-        user_id=body.userId,
-        name=body.datasetName,
+        user_id=body.user_id,
+        name=body.dataset_name,
         geometries=body.geometries,
         model_version=None,
     )
@@ -1584,7 +1583,7 @@ async def batch_validate(
         "total": polygon_count,
         "completed": 0,
         "status": "pending",
-        "imagery_source": body.imagerySource,
+        "imagery_source": body.imagery_source,
     }
 
     return {
