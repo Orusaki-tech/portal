@@ -38,6 +38,9 @@ function HomePageInner() {
             label: i.filename,
             tileUrl: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}${i.tile_url!}`,
             attribution: "User upload",
+            type: "cog" as const,
+            resolution: "Varies",
+            coverage: "User-defined",
           }))
         setUserSources(sources)
       } catch {
@@ -72,6 +75,9 @@ function HomePageInner() {
           label: "Uploaded Imagery",
           tileUrl: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}${tileUrl}`,
           attribution: "User upload",
+          type: "cog" as const,
+          resolution: "Varies",
+          coverage: "User-defined",
         })
       }
     },

@@ -46,6 +46,7 @@ export default function RootLayout({
             </Link>
             <nav className="flex gap-6 text-sm font-medium">
               <Link href="/" className="hover:text-blue-600">Map</Link>
+              <Link href="/upload" className="hover:text-blue-600">Upload</Link>
               <Link href="/dashboard" className="hover:text-blue-600">Triage</Link>
               <Link href="/initiatives" className="hover:text-blue-600">Initiatives</Link>
               <Link href="/marketplace" className="hover:text-blue-600">Marketplace</Link>

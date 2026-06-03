@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -276,6 +277,138 @@ class ScoreHackathonSubmissionRequest(BaseModel):
     initiative_id: UUID
     submission_id: UUID
     score: float
+
+
+# ---------------------------------------------------------------------------
+# Imagery Sources / STAC
+# ---------------------------------------------------------------------------
+
+
+PRESET_IMAGERY_SOURCES = [
+    {
+        "id": "naip",
+        "label": "NAIP (60cm, US)",
+        "tileUrl": "/tiles/naip/{z}/{x}/{y}.png",
+        "attribution": "USDA NAIP — Planet Labs",
+        "type": "xyz",
+        "resolution": "60cm–1m",
+        "coverage": "Continental US",
+        "thumbnail": "🛰️",
+    },
+    {
+        "id": "sentinel-2-l2a",
+        "label": "Sentinel-2 L2A (10m, Global)",
+        "tileUrl": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        "attribution": "ESA Copernicus — Esri",
+        "type": "stac",
+        "resolution": "10m",
+        "coverage": "Global",
+        "stacUrl": "https://planetarycomputer.microsoft.com/api/stac/v1",
+        "stacCollection": "sentinel-2-l2a",
+        "thumbnail": "🛰️",
+    },
+    {
+        "id": "landsat-c2-l2",
+        "label": "Landsat 8/9 (30m, Global)",
+        "tileUrl": "",
+        "attribution": "USGS — Microsoft Planetary Computer",
+        "type": "stac",
+        "resolution": "30m",
+        "coverage": "Global",
+        "stacUrl": "https://planetarycomputer.microsoft.com/api/stac/v1",
+        "stacCollection": "landsat-c2-l2",
+        "thumbnail": "🌍",
+    },
+    {
+        "id": "esri-world-imagery",
+        "label": "Esri World Imagery (~1m, Global)",
+        "tileUrl": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        "attribution": "Esri, Maxar, Earthstar Geographics",
+        "type": "xyz",
+        "resolution": "~1m",
+        "coverage": "Global",
+        "thumbnail": "🌐",
+    },
+    {
+        "id": "sentinel-1-rtc",
+        "label": "Sentinel-1 SAR (10m, Global)",
+        "tileUrl": "",
+        "attribution": "ESA — Microsoft Planetary Computer",
+        "type": "stac",
+        "resolution": "10m",
+        "coverage": "Global",
+        "stacUrl": "https://planetarycomputer.microsoft.com/api/stac/v1",
+        "stacCollection": "sentinel-1-rtc",
+        "thumbnail": "📡",
+    },
+    {
+        "id": "cbers-4-mux",
+        "label": "CBERS-4 (64m, Latin America)",
+        "tileUrl": "",
+        "attribution": "INPE — Brazil Data Cube",
+        "type": "stac",
+        "resolution": "64m",
+        "coverage": "Latin America",
+        "stacUrl": "https://data.inpe.br/bdc/stac/v1/",
+        "stacCollection": "CBERS4-MUX",
+        "thumbnail": "🛰️",
+    },
+    {
+        "id": "amazonia-1-wfi",
+        "label": "Amazonia-1 WFI (64m, Brazil)",
+        "tileUrl": "",
+        "attribution": "INPE — Brazil Data Cube",
+        "type": "stac",
+        "resolution": "64m",
+        "coverage": "Brazil",
+        "stacUrl": "https://data.inpe.br/bdc/stac/v1/",
+        "stacCollection": "AMAZONIA1-WFI",
+        "thumbnail": "🛰️",
+    },
+    {
+        "id": "cop-dem-glo-30",
+        "label": "Copernicus DEM (30m, Global)",
+        "tileUrl": "",
+        "attribution": "ESA — Microsoft Planetary Computer",
+        "type": "stac",
+        "resolution": "30m",
+        "coverage": "Global",
+        "stacUrl": "https://planetarycomputer.microsoft.com/api/stac/v1",
+        "stacCollection": "cop-dem-glo-30",
+        "thumbnail": "⛰️",
+    },
+    {
+        "id": "osm",
+        "label": "OpenStreetMap (Reference)",
+        "tileUrl": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "attribution": "OpenStreetMap contributors",
+        "type": "xyz",
+        "resolution": "N/A",
+        "coverage": "Global",
+        "thumbnail": "🗺️",
+    },
+]
+
+
+class StacQueryRequest(BaseModel):
+    stacUrl: str
+    collection: str
+    bbox: list[float] | None = None
+    geometry: dict[str, Any] | None = None
+    datetime: str | None = None
+    maxItems: int = 10
+    authToken: str | None = None
+
+
+class ValidateGeometriesRequest(BaseModel):
+    geometries: list[dict[str, str]]
+
+
+class BatchValidateRequest(BaseModel):
+    geometries: list[str]
+    imagerySource: str
+    userId: UUID
+    datasetName: str
 
 
 # ---------------------------------------------------------------------------
@@ -1199,3 +1332,272 @@ async def purchase_dataset(
         return results[0]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Imagery Sources
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/imagery/sources")
+async def list_imagery_sources(request: Request) -> Any:
+    """Return all configured imagery sources."""
+    return {
+        "sources": PRESET_IMAGERY_SOURCES,
+        "total": len(PRESET_IMAGERY_SOURCES),
+    }
+
+
+# ---------------------------------------------------------------------------
+# STAC Query
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/stac/query")
+async def stac_query(body: StacQueryRequest, request: Request) -> Any:
+    """Query a STAC endpoint for available imagery assets matching a spatial filter."""
+    import httpx
+
+    headers = {"Content-Type": "application/json"}
+    if body.authToken:
+        headers["Authorization"] = f"Bearer {body.authToken}"
+
+    search_params: dict[str, Any] = {
+        "collections": [body.collection],
+        "max_items": body.maxItems,
+    }
+
+    if body.bbox:
+        search_params["bbox"] = body.bbox
+    if body.geometry:
+        search_params["intersects"] = body.geometry
+    if body.datetime:
+        search_params["datetime"] = body.datetime
+
+    stac_url = body.stacUrl.rstrip("/")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{stac_url}/search",
+                json=search_params,
+                headers=headers,
+            )
+            if resp.status_code == 404:
+                resp2 = await client.get(
+                    f"{stac_url}/search",
+                    params=search_params,
+                    headers=headers,
+                )
+                if resp2.status_code != 200:
+                    raise HTTPException(
+                        status_code=resp2.status_code,
+                        detail=f"STAC query failed: {resp2.text}",
+                    )
+                data = resp2.json()
+            elif resp.status_code != 200:
+                raise HTTPException(
+                    status_code=resp.status_code,
+                    detail=f"STAC query failed: {resp.text}",
+                )
+            else:
+                data = resp.json()
+
+        features = data.get("features", [])
+        items = []
+
+        for feat in features:
+            assets = feat.get("assets", {})
+            cog_url = None
+            for key in ("image", "cog", "B04", "B03", "B02", "visual", "rendered_preview"):
+                if key in assets:
+                    cog_url = assets[key].get("href")
+                    if cog_url:
+                        break
+
+            if not cog_url:
+                for asset_key in assets:
+                    if assets[asset_key].get("type", "").startswith("image/tiff"):
+                        cog_url = assets[asset_key].get("href")
+                        break
+
+            props = feat.get("properties", {})
+            items.append({
+                "id": feat.get("id"),
+                "bbox": feat.get("bbox"),
+                "datetime": props.get("datetime"),
+                "cogUrl": cog_url,
+                "resolution": props.get("gsd") or props.get("eo:gsd"),
+                "cloudCover": props.get("eo:cloud_cover"),
+            })
+
+        return {"items": items, "total": len(items)}
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="STAC endpoint timed out")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"STAC connection failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Geometry Validation
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/datasets/validate-geometries")
+async def validate_geometries(body: ValidateGeometriesRequest, request: Request) -> Any:
+    """Server-side geometry validation using Shapely."""
+    try:
+        from shapely.geometry import Polygon as ShapelyPolygon
+        from shapely import wkt, is_valid, is_simple, explain_validity
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Shapely not available")
+
+    results = []
+
+    for entry in body.geometries:
+        wkt_str = entry.get("wkt", "")
+        idx = entry.get("id", "")
+
+        try:
+            geom = wkt.loads(wkt_str)
+        except Exception:
+            results.append({
+                "index": idx,
+                "vertexCount": 0,
+                "areaSqM": 0,
+                "isValid": False,
+                "isSimple": False,
+                "hasSelfIntersections": True,
+                "hasWrongRingOrientation": False,
+                "isDegenerate": True,
+                "bbox": None,
+                "warnings": [],
+                "errors": ["Invalid WKT: could not parse geometry"],
+            })
+            continue
+
+        errors = []
+        warnings = []
+        has_self_intersection = False
+        has_wrong_orientation = False
+        is_degenerate = False
+
+        if not bool(is_valid(geom)):
+            reason = explain_validity(geom)
+            errors.append(f"Invalid geometry: {reason}")
+
+        if not bool(is_simple(geom)):
+            has_self_intersection = True
+            if "Self-intersection" not in " ".join(errors):
+                errors.append("Self-intersection detected")
+
+        if geom.geom_type == "Polygon":
+            if not geom.exterior.is_ccw:
+                has_wrong_orientation = True
+                warnings.append("Exterior ring should be counter-clockwise")
+        elif geom.geom_type == "MultiPolygon":
+            for poly in geom.geoms:
+                if not poly.exterior.is_ccw:
+                    has_wrong_orientation = True
+                    warnings.append(f"Exterior ring orientation warning in polygon")
+
+        try:
+            area = geom.area
+            centroid = geom.centroid
+            cos_lat = abs(math.cos(math.radians(centroid.y))) if centroid.y is not None else 1.0
+            area_sq_m = area * (111320 ** 2) * cos_lat
+        except Exception:
+            area_sq_m = 0
+
+        try:
+            bbox = list(geom.bounds) if not geom.is_empty else None
+        except Exception:
+            bbox = None
+
+        vertex_count = 0
+        if geom.geom_type == "Polygon":
+            vertex_count = len(geom.exterior.coords)
+        elif geom.geom_type == "MultiPolygon":
+            vertex_count = sum(len(p.exterior.coords) for p in geom.geoms)
+
+        if vertex_count < 3:
+            is_degenerate = True
+            errors.append("Degenerate: too few vertices (< 3)")
+        if area_sq_m < 0.01:
+            is_degenerate = True
+            errors.append("Degenerate: zero or near-zero area")
+        if vertex_count > 500:
+            warnings.append(f"Large polygon: {vertex_count} vertices — may impact performance")
+
+        results.append({
+            "index": idx,
+            "vertexCount": vertex_count,
+            "areaSqM": round(area_sq_m, 2),
+            "isValid": len(errors) == 0,
+            "isSimple": not has_self_intersection,
+            "hasSelfIntersections": has_self_intersection,
+            "hasWrongRingOrientation": has_wrong_orientation,
+            "isDegenerate": is_degenerate,
+            "bbox": bbox,
+            "warnings": warnings,
+            "errors": errors,
+        })
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Batch Validation
+# ---------------------------------------------------------------------------
+
+_batch_jobs: dict[str, dict[str, Any]] = {}
+
+
+@app.post("/api/datasets/batch-validate")
+async def batch_validate(
+    body: BatchValidateRequest,
+    bus: Annotated[MessageBus, Depends(get_bus)],
+) -> Any:
+    """Upload a polygon set and validate all polygons against the specified imagery source."""
+    from uuid import uuid4
+
+    command = UploadPolygonSet(
+        user_id=body.userId,
+        name=body.datasetName,
+        geometries=body.geometries,
+        model_version=None,
+    )
+
+    try:
+        results = bus.handle(command)
+        upload_result = results[0]
+        set_id = upload_result.get("set_id")
+        polygon_count = upload_result.get("polygon_count", len(body.geometries))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    job_id = str(uuid4())
+    _batch_jobs[job_id] = {
+        "set_id": set_id,
+        "polygon_count": polygon_count,
+        "total": polygon_count,
+        "completed": 0,
+        "status": "pending",
+        "imagery_source": body.imagerySource,
+    }
+
+    return {
+        "set_id": set_id,
+        "job_id": job_id,
+        "polygon_count": polygon_count,
+    }
+
+
+@app.get("/api/datasets/batch-progress/{job_id}")
+async def get_batch_progress(job_id: str, request: Request) -> Any:
+    """Get the current progress of a batch validation job."""
+    job = _batch_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job

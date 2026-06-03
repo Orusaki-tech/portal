@@ -1,4 +1,5 @@
 import type { InitiativeResponse, GridBlockResponse, MarketplaceListingResponse, PaginatedResponse } from "@/types/api"
+import type { ImagerySource, GeometryValidationResult, BatchValidationProgress } from "@/types/polygon"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -391,6 +392,96 @@ export async function getLeaderboard(initiativeId: string): Promise<{ items: Lea
 export async function fetchCredits(userId: string): Promise<{ user_id: string; credits_remaining: number }> {
   if (!userId) throw new Error("userId is required")
   const res = await fetch(`${API_BASE}/api/credits/${userId}`, { headers: authHeaders() })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Imagery Sources
+// ---------------------------------------------------------------------------
+
+export async function fetchImagerySources(): Promise<{
+  sources: ImagerySource[]
+  total: number
+}> {
+  const res = await fetch(`${API_BASE}/api/imagery/sources`, { headers: authHeaders() })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// STAC
+// ---------------------------------------------------------------------------
+
+export async function queryStac(params: {
+  stacUrl: string
+  collection: string
+  bbox?: [number, number, number, number]
+  geometry?: Record<string, unknown>
+  datetime?: string
+  maxItems?: number
+  authToken?: string
+}): Promise<{
+  items: {
+    id: string
+    bbox: [number, number, number, number]
+    datetime: string
+    cogUrl: string
+    resolution: number | null
+    cloudCover: number | null
+  }[]
+  total: number
+}> {
+  const res = await fetch(`${API_BASE}/api/stac/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Geometry Validation
+// ---------------------------------------------------------------------------
+
+export async function validateGeometries(
+  geometries: { wkt: string; id: string }[]
+): Promise<GeometryValidationResult[]> {
+  const res = await fetch(`${API_BASE}/api/datasets/validate-geometries`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ geometries }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Batch Validation
+// ---------------------------------------------------------------------------
+
+export async function batchValidate(params: {
+  geometries: string[]
+  imagerySource: string
+  userId: string
+  datasetName: string
+}): Promise<{ set_id: string; job_id: string; polygon_count: number }> {
+  const res = await fetch(`${API_BASE}/api/datasets/batch-validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getBatchProgress(
+  jobId: string
+): Promise<BatchValidationProgress> {
+  const res = await fetch(`${API_BASE}/api/datasets/batch-progress/${jobId}`, {
+    headers: authHeaders(),
+  })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }

@@ -8,6 +8,10 @@ echo "1. Installing project + dev deps..."
 pip install -e ".[dev]"
 
 echo ""
+echo "   Installing frontend dependencies..."
+(cd frontend && npm install @turf/turf shpjs 2>/dev/null && npm install) || echo "  npm not available, run 'cd frontend && npm install' manually"
+
+echo ""
 echo "2. Installing pre-commit hooks..."
 pre-commit install
 
