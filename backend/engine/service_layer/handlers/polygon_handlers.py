@@ -5,24 +5,31 @@ from decimal import Decimal
 from uuid import uuid4
 
 from backend.engine.domain.commands import CorrectBoundary, UploadPolygonSet, ValidatePolygon
-from backend.engine.domain.events import BoundaryCorrected, ConsensusReached, GridBlockCompleted, PolygonValidated
-from backend.engine.domain.models import Correction, CreditTransaction, QaStatus, Polygon, PolygonSet, TaskGrid, User
+from backend.engine.domain.events import (
+    BoundaryCorrected,
+    ConsensusReached,
+    PolygonValidated,
+)
+from backend.engine.domain.models import (
+    Correction,
+    CreditTransaction,
+    Polygon,
+    PolygonSet,
+    QaStatus,
+    TaskGrid,
+)
 from backend.engine.service_layer.edge_service import validate_polygon
 from backend.engine.service_layer.unit_of_work import UnitOfWork
 
 logger = logging.getLogger(__name__)
 
 
-def handle_validate_polygon(
-    cmd: ValidatePolygon, uow: UnitOfWork
-) -> dict:
+def handle_validate_polygon(cmd: ValidatePolygon, uow: UnitOfWork) -> dict:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is None:
         raise ValueError(f"Grid {cmd.grid_id} not found")
 
-    polygon = next(
-        (p for p in grid.polygons if p.id == cmd.polygon_id), None
-    )
+    polygon = next((p for p in grid.polygons if p.id == cmd.polygon_id), None)
     if polygon is None:
         raise ValueError(f"Polygon {cmd.polygon_id} not found in grid")
 
@@ -31,14 +38,16 @@ def handle_validate_polygon(
         if user is None:
             raise ValueError(f"User {cmd.user_id} not found")
         user.deduct_credits(Decimal("1"))
-        uow.credit_txn_repo.add(CreditTransaction(
-            id=uuid4(),
-            user_id=cmd.user_id,
-            amount=Decimal("-1"),
-            transaction_type="validation",
-            reference_id=cmd.polygon_id,
-            description=f"Validation of polygon {cmd.polygon_id} in grid {cmd.grid_id}",
-        ))
+        uow.credit_txn_repo.add(
+            CreditTransaction(
+                id=uuid4(),
+                user_id=cmd.user_id,
+                amount=Decimal("-1"),
+                transaction_type="validation",
+                reference_id=cmd.polygon_id,
+                description=f"Validation of polygon {cmd.polygon_id} in grid {cmd.grid_id}",
+            )
+        )
 
     result = validate_polygon(
         geometry=polygon.original_geometry,
@@ -68,9 +77,7 @@ def handle_validate_polygon(
     }
 
 
-def handle_upload_polygon_set(
-    cmd: UploadPolygonSet, uow: UnitOfWork
-) -> dict:
+def handle_upload_polygon_set(cmd: UploadPolygonSet, uow: UnitOfWork) -> dict:
     user = uow.user_repo.get(cmd.user_id)
     if user is None:
         raise ValueError(f"User {cmd.user_id} not found")
@@ -118,14 +125,10 @@ def handle_upload_polygon_set(
     }
 
 
-def handle_correct_boundary(
-    cmd: CorrectBoundary, uow: UnitOfWork
-) -> dict:
+def handle_correct_boundary(cmd: CorrectBoundary, uow: UnitOfWork) -> dict:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is not None:
-        polygon = next(
-            (p for p in grid.polygons if p.id == cmd.polygon_id), None
-        )
+        polygon = next((p for p in grid.polygons if p.id == cmd.polygon_id), None)
     else:
         polygon = uow.polygon_repo.get(cmd.polygon_id) if hasattr(uow, "polygon_repo") else None
 
@@ -156,9 +159,8 @@ def handle_correct_boundary(
     corrections = uow.correction_repo.get_by_polygon(cmd.polygon_id)
     if len(corrections) >= 2:
         from backend.engine.service_layer.consensus import merge_annotations
-        annotations = [
-            (c.user_id, c.corrected_geometry) for c in corrections
-        ]
+
+        annotations = [(c.user_id, c.corrected_geometry) for c in corrections]
         merged = merge_annotations(annotations)
         polygon.correct(merged)
         polygon.qa_status = QaStatus.VALIDATED

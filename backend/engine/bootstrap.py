@@ -70,9 +70,9 @@ from backend.engine.service_layer.handlers import (
     handle_check_initiative_complete,
     handle_claim_grid_block,
     handle_classify_confidence,
+    handle_consensus_reached,
     handle_correct_boundary,
     handle_create_initiative,
-    handle_consensus_reached,
     handle_credits_exhausted,
     handle_dataset_purchased_notification,
     handle_deduct_credits,
@@ -93,13 +93,13 @@ from backend.engine.service_layer.handlers import (
     handle_purchase_dataset,
     handle_request_export,
     handle_score_hackathon_submission,
-    set_email_sender,
     handle_submit_grid_block,
     handle_submit_hackathon_result,
     handle_top_up_credits,
     handle_update_geometry,
     handle_upload_polygon_set,
     handle_validate_polygon,
+    set_email_sender,
 )
 from backend.engine.service_layer.messagebus import Handler, MessageBus
 from backend.engine.service_layer.unit_of_work import FakeUnitOfWork, UnitOfWork

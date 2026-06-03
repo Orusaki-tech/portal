@@ -5,29 +5,6 @@ import logging
 from backend.engine.adapters.email_sender import ConsoleEmailSender, EmailSender
 
 from .credit_handlers import handle_top_up_credits
-from .grid_handlers import (
-    handle_approve_grid_block,
-    handle_bulk_assign_grid_blocks,
-    handle_claim_grid_block,
-    handle_dispute_grid_block,
-    handle_generate_grid_blocks,
-    handle_lock_grid_block,
-    handle_submit_grid_block,
-    handle_check_grid_complete,
-    handle_check_initiative_complete,
-)
-from .initiative_handlers import handle_assign_participant, handle_create_initiative
-from .hackathon_handlers import (
-    handle_join_hackathon,
-    handle_submit_hackathon_result,
-    handle_score_hackathon_submission,
-)
-from .marketplace_handlers import handle_list_dataset_for_sale, handle_purchase_dataset
-from .polygon_handlers import (
-    handle_validate_polygon,
-    handle_upload_polygon_set,
-    handle_correct_boundary,
-)
 from .event_handlers import (
     handle_classify_confidence,
     handle_credits_exhausted,
@@ -38,8 +15,70 @@ from .event_handlers import (
     handle_request_export,
     handle_update_geometry,
 )
+from .grid_handlers import (
+    handle_approve_grid_block,
+    handle_bulk_assign_grid_blocks,
+    handle_check_grid_complete,
+    handle_check_initiative_complete,
+    handle_claim_grid_block,
+    handle_dispute_grid_block,
+    handle_generate_grid_blocks,
+    handle_lock_grid_block,
+    handle_submit_grid_block,
+)
+from .hackathon_handlers import (
+    handle_join_hackathon,
+    handle_score_hackathon_submission,
+    handle_submit_hackathon_result,
+)
+from .initiative_handlers import handle_assign_participant, handle_create_initiative
+from .marketplace_handlers import handle_list_dataset_for_sale, handle_purchase_dataset
+from .polygon_handlers import (
+    handle_correct_boundary,
+    handle_upload_polygon_set,
+    handle_validate_polygon,
+)
 
-# Event handlers for new events
+__all__ = [
+    "handle_approve_grid_block",
+    "handle_assign_participant",
+    "handle_bulk_assign_grid_blocks",
+    "handle_check_grid_complete",
+    "handle_check_initiative_complete",
+    "handle_claim_grid_block",
+    "handle_classify_confidence",
+    "handle_consensus_reached",
+    "handle_correct_boundary",
+    "handle_create_initiative",
+    "handle_credits_exhausted",
+    "handle_dataset_purchased_notification",
+    "handle_deduct_credits",
+    "handle_dispute_grid_block",
+    "handle_flag_for_review",
+    "handle_generate_grid_blocks",
+    "handle_grid_disputed",
+    "handle_grid_locked",
+    "handle_grid_submitted",
+    "handle_hackathon_joined_notification",
+    "handle_hackathon_score_updated",
+    "handle_initiative_completed_notification",
+    "handle_join_hackathon",
+    "handle_list_dataset_for_sale",
+    "handle_lock_grid_block",
+    "handle_low_confidence_trigger",
+    "handle_notify_export_complete",
+    "handle_purchase_dataset",
+    "handle_request_export",
+    "handle_score_hackathon_submission",
+    "handle_submit_grid_block",
+    "handle_submit_hackathon_result",
+    "handle_top_up_credits",
+    "handle_update_geometry",
+    "handle_upload_polygon_set",
+    "handle_validate_polygon",
+    "set_email_sender",
+]
+
 logger = logging.getLogger(__name__)
 
 _email_sender: EmailSender = ConsoleEmailSender()
@@ -79,7 +118,11 @@ def handle_initiative_completed_notification(event, uow) -> None:
 
 def handle_dataset_purchased_notification(event, uow) -> None:
     buyer = uow.user_repo.get(event.buyer_id)
-    listing = uow.marketplace_repo.get_listing(event.listing_id) if hasattr(uow, "marketplace_repo") else None
+    listing = (
+        uow.marketplace_repo.get_listing(event.listing_id)
+        if hasattr(uow, "marketplace_repo")
+        else None
+    )
     seller = None
     if listing is not None:
         seller = uow.user_repo.get(listing.seller_id)
@@ -98,7 +141,7 @@ def handle_dataset_purchased_notification(event, uow) -> None:
             to=seller.email,
             subject="Your dataset has been sold",
             body=(
-                f"Your dataset listing {event.listing_id} was purchased for {event.tokens_paid} tokens.\n"
+                f"Your dataset listing {event.listing_id} was purchased for {event.tokens_paid} tokens.\n"  # noqa: E501
                 "The tokens have been credited to your account."
             ),
         )

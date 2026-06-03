@@ -14,12 +14,10 @@ import re
 import sentry_sdk
 from fastapi import FastAPI, Query
 from fastapi.responses import Response
+from rasterio.io import MemoryFile
+from starlette.middleware.cors import CORSMiddleware
 from titiler.core.factory import TilerFactory
 from titiler.core.resources.enums import ImageType
-from rasterio.io import MemoryFile
-
-from starlette.middleware.cors import CORSMiddleware
-
 
 sentry_sdk.init(
     dsn=os.getenv("SENTRY_DSN"),
@@ -44,9 +42,7 @@ cog_tiler = TilerFactory()
 app.include_router(cog_tiler.router, prefix="/cog")
 
 
-COG_PATTERN = re.compile(
-    r"^https?://storage\.googleapis\.com/([^/]+)/(.+\.tif)"
-)
+COG_PATTERN = re.compile(r"^https?://storage\.googleapis\.com/([^/]+)/(.+\.tif)")
 
 
 @app.get("/health")
@@ -68,18 +64,20 @@ async def tile(
     """
     import httpx
     from titiler.core.factory import TileFactory
-    
+
     tile_factory = TileFactory()
     tile_params = tile_factory.get_tile_params(z, x, y)
-    
-    image_type = ImageType[format.upper()] if format.upper() in ImageType.__members__ else ImageType.WEBP
-    
+
+    image_type = (
+        ImageType[format.upper()] if format.upper() in ImageType.__members__ else ImageType.WEBP
+    )
+
     try:
         resp = httpx.get(url, timeout=30)
         resp.raise_for_status()
     except (httpx.HTTPError, httpx.TimeoutException) as exc:
         return Response(status_code=404, content=f"COG not found or unreachable: {exc}")
-    
+
     with MemoryFile(resp.content) as memfile:
         with memfile.open() as src:
             tile_data = src.read(
@@ -87,15 +85,17 @@ async def tile(
                 window=tile_params.window,
                 out_shape=(3, tile_params.height, tile_params.width),
             )
-    
-    import numpy as np
+
     from io import BytesIO
-    
+
+    import numpy as np
+
     tile_data = np.clip(tile_data, 0, 255).astype(np.uint8)
-    
+
     # Encode to requested format
     if image_type == ImageType.PNG:
         from PIL import Image
+
         img = Image.fromarray(np.moveaxis(tile_data, 0, -1))
         buf = BytesIO()
         img.save(buf, format="PNG")
@@ -103,6 +103,7 @@ async def tile(
         media_type = "image/png"
     elif image_type == ImageType.JPEG:
         from PIL import Image
+
         img = Image.fromarray(np.moveaxis(tile_data, 0, -1))
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=85)
@@ -110,12 +111,13 @@ async def tile(
         media_type = "image/jpeg"
     else:
         from PIL import Image
+
         img = Image.fromarray(np.moveaxis(tile_data, 0, -1))
         buf = BytesIO()
         img.save(buf, format="WEBP", quality=80)
         content = buf.getvalue()
         media_type = "image/webp"
-    
+
     return Response(content=content, media_type=media_type)
 
 

@@ -45,11 +45,13 @@ def handle_submit_hackathon_result(cmd: SubmitHackathonResult, uow: UnitOfWork) 
         raise ValueError(f"User {cmd.user_id} has not joined hackathon {cmd.initiative_id}")
 
     entry.submit_result(cmd.score, cmd.accuracy_pct)
-    entry.raise_event(HackathonScoreUpdated(
-        initiative_id=cmd.initiative_id,
-        user_id=cmd.user_id,
-        score=cmd.score,
-    ))
+    entry.raise_event(
+        HackathonScoreUpdated(
+            initiative_id=cmd.initiative_id,
+            user_id=cmd.user_id,
+            score=cmd.score,
+        )
+    )
     uow.leaderboard_repo.upsert(entry)
 
 
@@ -57,12 +59,16 @@ def handle_score_hackathon_submission(cmd: ScoreHackathonSubmission, uow: UnitOf
     entries = uow.leaderboard_repo.list_by_initiative(cmd.initiative_id)
     target = next((e for e in entries if e.id == cmd.submission_id), None)
     if target is None:
-        raise ValueError(f"Submission {cmd.submission_id} not found in hackathon {cmd.initiative_id}")
+        raise ValueError(
+            f"Submission {cmd.submission_id} not found in hackathon {cmd.initiative_id}"
+        )
 
     target.update_score(cmd.score, target.accuracy_pct)
-    target.raise_event(HackathonScoreUpdated(
-        initiative_id=cmd.initiative_id,
-        user_id=target.user_id,
-        score=cmd.score,
-    ))
+    target.raise_event(
+        HackathonScoreUpdated(
+            initiative_id=cmd.initiative_id,
+            user_id=target.user_id,
+            score=cmd.score,
+        )
+    )
     uow.leaderboard_repo.upsert(target)

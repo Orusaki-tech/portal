@@ -4,7 +4,7 @@ import logging
 from statistics import median
 from uuid import UUID
 
-from shapely import wkt, Polygon, geometry as sgeom
+from shapely import Polygon, wkt
 
 logger = logging.getLogger(__name__)
 

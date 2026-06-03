@@ -121,6 +121,7 @@ async def upload_local(
 
     try:
         from osgeo import gdal
+
         gdal.Translate(str(cog_path), str(local_path), options="-of COG")
         cog_uri = f"local://{cog_path}"
         logger.info("Converted upload to COG at %s", cog_path)

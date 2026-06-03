@@ -14,9 +14,7 @@ class EmailSender(ABC):
 
 class ConsoleEmailSender(EmailSender):
     def send(self, to: str, subject: str, body: str) -> None:
-        logger.info(
-            "Email sent — to=%s subject=%s body=%s", to, subject, body
-        )
+        logger.info("Email sent — to=%s subject=%s body=%s", to, subject, body)
 
 
 class NullEmailSender(EmailSender):

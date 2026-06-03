@@ -28,16 +28,16 @@ def compute_confidence(
 ) -> float:
     if weights is None:
         weights = ConfidenceWeights()
-    
+
     snake_strain = min(total_vertex_movement / max(polygon_perimeter, 1e-6), 1.0)
     normalized_deviation = min(mean_deviation / max(buffer_width_meters, 1e-6), 1.0)
-    
+
     score = (
         weights.spectral * spectral_contrast
         + weights.strain * (1.0 - snake_strain)
         + weights.deviation * (1.0 - normalized_deviation)
     )
-    
+
     return round(min(max(score, 0.0), 1.0), 4)
 
 

@@ -50,9 +50,7 @@ def mark_applied(conn, filename):
 
 def get_migration_files():
     pattern = re.compile(r"^\d{3}_.+\.sql$")
-    files = sorted(
-        f for f in os.listdir(MIGRATIONS_DIR) if pattern.match(f)
-    )
+    files = sorted(f for f in os.listdir(MIGRATIONS_DIR) if pattern.match(f))
     return files
 
 

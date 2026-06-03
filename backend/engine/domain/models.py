@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-
-UTC = timezone.utc
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from shapely import wkt
 
@@ -17,7 +15,7 @@ from backend.engine.domain.events import (
 )
 
 
-class QaStatus(str, Enum):
+class QaStatus(Enum):
     PENDING = "pending"
     VALIDATED = "validated"
     LOW_CONFIDENCE = "low_confidence"
@@ -25,7 +23,7 @@ class QaStatus(str, Enum):
     ESCALATED = "escalated"
 
 
-class GridStatus(str, Enum):
+class GridStatus(Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     AWAITING_REVIEW = "awaiting_review"
@@ -33,7 +31,7 @@ class GridStatus(str, Enum):
     DISPUTED = "disputed"
 
 
-class InitiativeStatus(str, Enum):
+class InitiativeStatus(Enum):
     DRAFT = "draft"
     ACTIVE = "active"
     PAUSED = "paused"
@@ -66,9 +64,7 @@ class ConfidenceScore:
             raise ValueError(f"Confidence must be 0.0–1.0, got {self.overall}")
         for v in self.per_vertex:
             if not (0.0 <= v.confidence_score <= 1.0):
-                raise ValueError(
-                    f"Per-vertex confidence must be 0.0–1.0, got {v.confidence_score}"
-                )
+                raise ValueError(f"Per-vertex confidence must be 0.0–1.0, got {v.confidence_score}")
 
 
 @dataclass
@@ -117,13 +113,16 @@ class TaskGrid:
     polygons: list[Polygon] = field(default_factory=list)
     _events: list[Event] = field(default_factory=list)
 
-    _transitions: dict[GridStatus, set[GridStatus]] = field(default_factory=lambda: {
-        GridStatus.PENDING: {GridStatus.IN_PROGRESS},
-        GridStatus.IN_PROGRESS: {GridStatus.AWAITING_REVIEW, GridStatus.PENDING},
-        GridStatus.AWAITING_REVIEW: {GridStatus.COMPLETE, GridStatus.DISPUTED},
-        GridStatus.DISPUTED: {GridStatus.PENDING},
-        GridStatus.COMPLETE: set(),
-    }, repr=False)
+    _transitions: dict[GridStatus, set[GridStatus]] = field(
+        default_factory=lambda: {
+            GridStatus.PENDING: {GridStatus.IN_PROGRESS},
+            GridStatus.IN_PROGRESS: {GridStatus.AWAITING_REVIEW, GridStatus.PENDING},
+            GridStatus.AWAITING_REVIEW: {GridStatus.COMPLETE, GridStatus.DISPUTED},
+            GridStatus.DISPUTED: {GridStatus.PENDING},
+            GridStatus.COMPLETE: set(),
+        },
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         try:
@@ -141,9 +140,7 @@ class TaskGrid:
 
     def assign_to(self, user_id: UUID) -> None:
         if self.assigned_user_id is not None and self.assigned_user_id != user_id:
-            raise ValueError(
-                f"Grid {self.id} is already assigned to {self.assigned_user_id}"
-            )
+            raise ValueError(f"Grid {self.id} is already assigned to {self.assigned_user_id}")
         self.assigned_user_id = user_id
 
     def lock(self, user_id: UUID) -> None:
@@ -166,9 +163,7 @@ class TaskGrid:
     def complete(self) -> None:
         self._transition_to(GridStatus.COMPLETE)
         self.completed_at = datetime.now(UTC)
-        self._events.append(
-            GridBlockCompleted(grid_id=self.id, initiative_id=self.initiative_id)
-        )
+        self._events.append(GridBlockCompleted(grid_id=self.id, initiative_id=self.initiative_id))
 
     def dispute(self, notes: str) -> None:
         self._transition_to(GridStatus.DISPUTED)
@@ -206,13 +201,13 @@ class User:
             raise ValueError(f"Invalid role '{self.role}'; must be one of {valid_roles}")
         valid_tiers = {"free", "starter", "professional"}
         if self.subscription_tier not in valid_tiers:
-            raise ValueError(f"Invalid subscription_tier '{self.subscription_tier}'; must be one of {valid_tiers}")
+            raise ValueError(
+                f"Invalid subscription_tier '{self.subscription_tier}'; must be one of {valid_tiers}"  # noqa: E501
+            )
 
     def deduct_credits(self, amount: Decimal) -> None:
         if amount > self.credits_remaining:
-            raise ValueError(
-                f"Insufficient credits: {self.credits_remaining} < {amount}"
-            )
+            raise ValueError(f"Insufficient credits: {self.credits_remaining} < {amount}")
         self.credits_remaining -= amount
         if self.credits_remaining == 0:
             self._events.append(CreditsExhausted(user_id=self.id))
@@ -321,7 +316,9 @@ class ExportJob:
     created_at: datetime | None = None
     completed_at: datetime | None = None
 
-    _valid_formats = frozenset({"geojson", "coco", "yolo", "pascal_voc", "tfrecord", "parquet", "geopackage"})
+    _valid_formats = frozenset(
+        {"geojson", "coco", "yolo", "pascal_voc", "tfrecord", "parquet", "geopackage"}
+    )
     _valid_source_types = frozenset({"dataset", "initiative", "grid"})
 
     def __post_init__(self) -> None:
@@ -445,6 +442,7 @@ class ValidationRun:
             raise ValueError(f"ambiguous_count must be non-negative, got {self.ambiguous_count}")
         if self.region is not None:
             from shapely import wkt as shapely_wkt
+
             try:
                 shapely_wkt.loads(self.region)
             except Exception as e:
@@ -469,7 +467,9 @@ class LeaderboardEntry:
         if not (0.0 <= self.accuracy_pct <= 100.0):
             raise ValueError(f"accuracy_pct must be 0.0–100.0, got {self.accuracy_pct}")
         if self.polygons_submitted < 0:
-            raise ValueError(f"polygons_submitted must be non-negative, got {self.polygons_submitted}")
+            raise ValueError(
+                f"polygons_submitted must be non-negative, got {self.polygons_submitted}"
+            )
 
     def submit_result(self, new_score: float, accuracy_pct: float) -> None:
         self.score = new_score

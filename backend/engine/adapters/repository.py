@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -131,7 +131,9 @@ class AbstractLeaderboardRepository(ABC):
     def upsert(self, entry: LeaderboardEntry) -> None: ...
 
     @abstractmethod
-    def get_by_user_and_initiative(self, initiative_id: UUID, user_id: UUID) -> LeaderboardEntry | None: ...
+    def get_by_user_and_initiative(
+        self, initiative_id: UUID, user_id: UUID
+    ) -> LeaderboardEntry | None: ...
 
     @abstractmethod
     def list_by_initiative(self, initiative_id: UUID) -> list[LeaderboardEntry]: ...
@@ -169,9 +171,14 @@ class PostgresTaskGridRepository(AbstractTaskGridRepository):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    grid.id, grid.initiative_id, grid.geometry,
-                    grid.status.value, grid.assigned_user_id,
-                    grid.locked_at, grid.completed_at, grid.review_notes,
+                    grid.id,
+                    grid.initiative_id,
+                    grid.geometry,
+                    grid.status.value,
+                    grid.assigned_user_id,
+                    grid.locked_at,
+                    grid.completed_at,
+                    grid.review_notes,
                 ),
             )
             for polygon in grid.polygons:
@@ -183,9 +190,12 @@ class PostgresTaskGridRepository(AbstractTaskGridRepository):
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        polygon.id, polygon.polygon_set_id, polygon.task_grid_id,
+                        polygon.id,
+                        polygon.polygon_set_id,
+                        polygon.task_grid_id,
                         polygon.original_geometry,
-                        polygon.qa_status.value, polygon.confidence_avg,
+                        polygon.qa_status.value,
+                        polygon.confidence_avg,
                         polygon.corrected_geometry,
                         psycopg2.extras.Json(polygon.properties or {}),
                     ),
@@ -259,17 +269,6 @@ class PostgresUserRepository(AbstractUserRepository):
         self.conn = conn
         self.seen: dict[UUID, User] = {}
 
-    def add(self, user: User) -> None:
-        self.seen[user.id] = user
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO users (id, email, name, role, credits_remaining)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                (user.id, user.email, user.name, user.role, user.credits_remaining),
-            )
-
     def get(self, user_id: UUID) -> User | None:
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
@@ -317,8 +316,7 @@ class PostgresUserRepository(AbstractUserRepository):
                 INSERT INTO users (id, email, name, role, credits_remaining, api_key)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (user.id, user.email, user.name, user.role,
-                 user.credits_remaining, user.api_key),
+                (user.id, user.email, user.name, user.role, user.credits_remaining, user.api_key),
             )
 
 
@@ -330,13 +328,17 @@ class PostgresInitiativeRepository(AbstractInitiativeRepository):
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO initiatives (id, owner_id, name, region, status, grid_size_m, budget_credits)
+                 INSERT INTO initiatives (id, owner_id, name, region, status, grid_size_m, budget_credits)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    initiative.id, initiative.owner_id, initiative.name,
-                    initiative.region, initiative.status.value,
-                    initiative.grid_size_m, initiative.budget_credits,
+                    initiative.id,
+                    initiative.owner_id,
+                    initiative.name,
+                    initiative.region,
+                    initiative.status.value,
+                    initiative.grid_size_m,
+                    initiative.budget_credits,
                 ),
             )
 
@@ -392,9 +394,13 @@ class PostgresCorrectionRepository(AbstractCorrectionRepository):
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    correction.id, correction.polygon_id, correction.user_id,
-                    correction.original_geometry, correction.corrected_geometry,
-                    correction.action, correction.notes,
+                    correction.id,
+                    correction.polygon_id,
+                    correction.user_id,
+                    correction.original_geometry,
+                    correction.corrected_geometry,
+                    correction.action,
+                    correction.notes,
                 ),
             )
 
@@ -432,9 +438,14 @@ class PostgresExportRepository(AbstractExportRepository):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    job.export_id, job.user_id, job.export_format,
-                    job.source_type, job.source_id, job.status,
-                    job.output_url, job.error_message,
+                    job.export_id,
+                    job.user_id,
+                    job.export_format,
+                    job.source_type,
+                    job.source_id,
+                    job.status,
+                    job.output_url,
+                    job.error_message,
                     json.dumps(job.export_params) if job.export_params else None,
                 ),
             )
@@ -485,10 +496,16 @@ class PostgresMarketplaceRepository(AbstractMarketplaceRepository):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    listing.listing_id, listing.seller_id, listing.dataset_id,
-                    listing.title, listing.description,
-                    listing.price_tokens, listing.geometry_count,
-                    listing.quality_score, listing.completion_rate, listing.status,
+                    listing.listing_id,
+                    listing.seller_id,
+                    listing.dataset_id,
+                    listing.title,
+                    listing.description,
+                    listing.price_tokens,
+                    listing.geometry_count,
+                    listing.quality_score,
+                    listing.completion_rate,
+                    listing.status,
                 ),
             )
 
@@ -519,8 +536,11 @@ class PostgresMarketplaceRepository(AbstractMarketplaceRepository):
                 VALUES (%s, %s, %s, %s, %s)
                 """,
                 (
-                    purchase.purchase_id, purchase.listing_id, purchase.buyer_id,
-                    purchase.dataset_id, purchase.tokens_paid,
+                    purchase.purchase_id,
+                    purchase.listing_id,
+                    purchase.buyer_id,
+                    purchase.dataset_id,
+                    purchase.tokens_paid,
                 ),
             )
 
@@ -689,8 +709,11 @@ class PostgresMlPolygonSetRepository(AbstractMlPolygonSetRepository):
                 VALUES (%s, %s, %s, %s, %s)
                 """,
                 (
-                    polygon_set.id, polygon_set.user_id, polygon_set.name,
-                    polygon_set.model_version, polygon_set.description,
+                    polygon_set.id,
+                    polygon_set.user_id,
+                    polygon_set.name,
+                    polygon_set.model_version,
+                    polygon_set.description,
                 ),
             )
 
@@ -729,14 +752,20 @@ class PostgresLeaderboardRepository(AbstractLeaderboardRepository):
                     submitted_at = EXCLUDED.submitted_at
                 """,
                 (
-                    entry.id, entry.initiative_id, entry.user_id,
-                    entry.score, entry.polygons_submitted, entry.accuracy_pct,
-                    entry.submitted_at or datetime.now(timezone.utc),
+                    entry.id,
+                    entry.initiative_id,
+                    entry.user_id,
+                    entry.score,
+                    entry.polygons_submitted,
+                    entry.accuracy_pct,
+                    entry.submitted_at or datetime.now(UTC),
                 ),
             )
             self.seen[entry.id] = entry
 
-    def get_by_user_and_initiative(self, initiative_id: UUID, user_id: UUID) -> LeaderboardEntry | None:
+    def get_by_user_and_initiative(
+        self, initiative_id: UUID, user_id: UUID
+    ) -> LeaderboardEntry | None:
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT * FROM hackathon_leaderboard WHERE initiative_id = %s AND user_id = %s",
@@ -805,7 +834,7 @@ class FakeMarketplaceRepository(AbstractMarketplaceRepository):
         return self._listings.get(listing_id)
 
     def list_active(self) -> list[MarketplaceListing]:
-        return [l for l in self._listings.values() if l.status == "active"]
+        return [listing for listing in self._listings.values() if listing.status == "active"]
 
     def add_purchase(self, purchase: DatasetPurchase) -> None:
         self._purchases.append(purchase)
@@ -831,7 +860,9 @@ class FakeLeaderboardRepository(AbstractLeaderboardRepository):
         else:
             self._entries[key] = entry
 
-    def get_by_user_and_initiative(self, initiative_id: UUID, user_id: UUID) -> LeaderboardEntry | None:
+    def get_by_user_and_initiative(
+        self, initiative_id: UUID, user_id: UUID
+    ) -> LeaderboardEntry | None:
         return self._entries.get(f"{initiative_id}:{user_id}")
 
     def list_by_initiative(self, initiative_id: UUID) -> list[LeaderboardEntry]:
@@ -878,7 +909,17 @@ class PostgresValidationRunRepository(AbstractValidationRunRepository):
                 INSERT INTO validation_runs (id, user_id, polygon_set_id, polygon_count, ambiguous_count, cost_credits, status, imagery_id, region)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (run.id, run.user_id, run.polygon_set_id, run.polygon_count, run.ambiguous_count, run.cost_credits, run.status, run.imagery_id, run.region),
+                (
+                    run.id,
+                    run.user_id,
+                    run.polygon_set_id,
+                    run.polygon_count,
+                    run.ambiguous_count,
+                    run.cost_credits,
+                    run.status,
+                    run.imagery_id,
+                    run.region,
+                ),
             )
 
     def get(self, run_id: UUID) -> ValidationRun | None:
@@ -948,7 +989,14 @@ class PostgresCreditTransactionRepository(AbstractCreditTransactionRepository):
                 INSERT INTO credit_transactions (id, user_id, amount, transaction_type, reference_id, description)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (txn.id, txn.user_id, txn.amount, txn.transaction_type, txn.reference_id, txn.description),
+                (
+                    txn.id,
+                    txn.user_id,
+                    txn.amount,
+                    txn.transaction_type,
+                    txn.reference_id,
+                    txn.description,
+                ),
             )
 
     def list_by_user(self, user_id: UUID) -> list[CreditTransaction]:

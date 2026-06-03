@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID, uuid4
 
-import os
-
-import sentry_sdk
 import psycopg2
+import sentry_sdk
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -38,13 +37,11 @@ from backend.engine.domain.commands import (
     UploadPolygonSet,
     ValidatePolygon,
 )
+from backend.engine.entrypoints.tiles import router as tiles_router
+from backend.engine.entrypoints.upload import router as upload_router
 from backend.engine.service_layer.export_worker import ExportWorker
 from backend.engine.service_layer.messagebus import MessageBus
 from backend.engine.service_layer.unit_of_work import PostgresUnitOfWork
-
-from backend.engine.entrypoints.upload import router as upload_router
-from backend.engine.entrypoints.tiles import router as tiles_router
-
 
 _worker: ExportWorker | None = None
 
@@ -86,7 +83,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost:8080").split(",")
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost:8080").split(
+    ","
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -113,9 +112,10 @@ def _resolve_user(api_key: str) -> UUID | None:
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    path = request.url.path
-
-    if any(uri.startswith(p) for p in ("/health", "/docs", "/openapi", "/tiles", "/api/auth")):
+    if any(
+        request.url.path.startswith(p)
+        for p in ("/health", "/docs", "/openapi", "/tiles", "/api/auth")
+    ):
         return await call_next(request)
 
     auth_header = request.headers.get("Authorization", "")
@@ -312,7 +312,12 @@ async def login(body: LoginRequest) -> dict:
         user = repo.get_by_email(body.email)
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
-        return {"user_id": str(user.id), "api_key": user.api_key, "name": user.name, "role": user.role}
+        return {
+            "user_id": str(user.id),
+            "api_key": user.api_key,
+            "name": user.name,
+            "role": user.role,
+        }
     finally:
         conn.close()
 
@@ -370,6 +375,7 @@ async def list_imagery(
 async def register(body: RegisterRequest) -> dict:
     """Create a new user and return an API key."""
     import secrets
+
     from backend.engine.domain.models import User
 
     api_key = secrets.token_hex(32)
@@ -395,7 +401,7 @@ async def register(body: RegisterRequest) -> dict:
 async def upload_dataset(
     body: UploadPolygonSetRequest,
     bus: Annotated[MessageBus, Depends(get_bus)],
-    ) -> dict:
+) -> dict:
     """Upload a set of polygons for ML-based validation."""
     try:
         results = bus.handle(
@@ -494,7 +500,7 @@ async def list_initiatives(
     with bus.uow as uow:
         items = uow.initiative_repo.list(owner_id=owner_id, status=status)
     offset = (page - 1) * per_page
-    page_items = items[offset:offset + per_page]
+    page_items = items[offset : offset + per_page]
     return {
         "items": [
             {
@@ -593,6 +599,7 @@ async def update_initiative(
             initiative.region = body.region
         if body.status is not None:
             from backend.engine.domain.models import InitiativeStatus
+
             initiative.status = InitiativeStatus(body.status)
         if body.grid_size_m is not None:
             initiative.grid_size_m = body.grid_size_m
@@ -632,12 +639,14 @@ async def submit_hackathon_result(
 ) -> dict:
     """Submit a score result for a hackathon participant."""
     try:
-        bus.handle(SubmitHackathonResult(
-            initiative_id=body.initiative_id,
-            user_id=body.user_id,
-            score=body.score,
-            accuracy_pct=body.accuracy_pct,
-        ))
+        bus.handle(
+            SubmitHackathonResult(
+                initiative_id=body.initiative_id,
+                user_id=body.user_id,
+                score=body.score,
+                accuracy_pct=body.accuracy_pct,
+            )
+        )
         return {"status": "submitted"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -650,11 +659,13 @@ async def score_hackathon_submission(
 ) -> dict:
     """Score/update a specific hackathon submission."""
     try:
-        bus.handle(ScoreHackathonSubmission(
-            initiative_id=body.initiative_id,
-            submission_id=body.submission_id,
-            score=body.score,
-        ))
+        bus.handle(
+            ScoreHackathonSubmission(
+                initiative_id=body.initiative_id,
+                submission_id=body.submission_id,
+                score=body.score,
+            )
+        )
         return {"status": "scored"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -716,7 +727,7 @@ async def list_polygons(
 
             where = " AND ".join(conditions)
             cur.execute(
-                f"SELECT COUNT(*) FROM ml_polygons p JOIN map_task_grid g ON p.task_grid_id = g.grid_id WHERE {where}",
+                f"SELECT COUNT(*) FROM ml_polygons p JOIN map_task_grid g ON p.task_grid_id = g.grid_id WHERE {where}",  # noqa: E501
                 params,
             )
             total = cur.fetchone()["count"]
@@ -859,7 +870,8 @@ async def get_triage(
             total = cur.fetchone()["count"]
 
             offset = (page - 1) * per_page
-            items_q = f"""
+            items_q = (
+                f"""
                 SELECT
                     p.id AS polygon_id,
                     p.polygon_set_id,
@@ -882,11 +894,14 @@ async def get_triage(
                     FROM human_corrections GROUP BY polygon_id
                 ) h ON h.polygon_id = p.id
                 WHERE {conditions[0]}
-            """ + " AND ".join(f" AND {c}" for c in conditions[1:]) + """
+            """
+                + " AND ".join(f" AND {c}" for c in conditions[1:])
+                + """
                 GROUP BY p.id, p.polygon_set_id, p.qa_status, p.confidence_avg, h.correction_count
                 ORDER BY computed_confidence ASC NULLS LAST
                 LIMIT %s OFFSET %s
             """
+            )
             cur.execute(items_q, params + [per_page, offset])
             items = cur.fetchall()
 
@@ -927,7 +942,7 @@ async def get_credits(
     request: Request,
     bus: Annotated[MessageBus, Depends(get_bus)],
 ) -> dict:
-    """Fetch a user's current credit balance. Only the authenticated user can view their own balance."""
+    """Fetch a user's current credit balance. Only the authenticated user can view their own balance."""  # noqa: E501
     authed_user = getattr(request.state, "user_id", None)
     if authed_user is None or authed_user != user_id:
         raise HTTPException(status_code=403, detail="You can only view your own credits")
@@ -1060,9 +1075,7 @@ async def submit_grid_block(
 ) -> dict:
     """Submit a grid block for review."""
     try:
-        results = bus.handle(
-            SubmitGridBlock(grid_id=body.grid_id)
-        )
+        results = bus.handle(SubmitGridBlock(grid_id=body.grid_id))
         return results[0]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1075,9 +1088,7 @@ async def approve_grid_block(
 ) -> dict:
     """Approve a grid block (reviewer action)."""
     try:
-        results = bus.handle(
-            ApproveGridBlock(grid_id=body.grid_id, reviewer_id=body.reviewer_id)
-        )
+        results = bus.handle(ApproveGridBlock(grid_id=body.grid_id, reviewer_id=body.reviewer_id))
         return results[0]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1105,9 +1116,7 @@ async def bulk_assign_grids(
 ) -> dict:
     """Bulk assign grid blocks to a user (admin)."""
     try:
-        results = bus.handle(
-            BulkAssignGridBlocks(grid_ids=body.grid_ids, user_id=body.user_id)
-        )
+        results = bus.handle(BulkAssignGridBlocks(grid_ids=body.grid_ids, user_id=body.user_id))
         return results[0]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1128,23 +1137,23 @@ async def list_marketplace(
     with bus.uow as uow:
         listings = uow.marketplace_repo.list_active()
     offset = (page - 1) * per_page
-    page_listings = listings[offset:offset + per_page]
+    page_listings = listings[offset : offset + per_page]
     return {
         "listings": [
             {
-                "listing_id": str(l.listing_id),
-                "seller_id": str(l.seller_id),
-                "dataset_id": str(l.dataset_id),
-                "title": l.title,
-                "description": l.description,
-                "price_tokens": float(l.price_tokens),
-                "geometry_count": l.geometry_count,
-                "quality_score": l.quality_score,
-                "completion_rate": l.completion_rate,
-                "status": l.status,
-                "created_at": l.created_at.isoformat() if l.created_at else None,
+                "listing_id": str(listing.listing_id),
+                "seller_id": str(listing.seller_id),
+                "dataset_id": str(listing.dataset_id),
+                "title": listing.title,
+                "description": listing.description,
+                "price_tokens": float(listing.price_tokens),
+                "geometry_count": listing.geometry_count,
+                "quality_score": listing.quality_score,
+                "completion_rate": listing.completion_rate,
+                "status": listing.status,
+                "created_at": listing.created_at.isoformat() if listing.created_at else None,
             }
-            for l in page_listings
+            for listing in page_listings
         ],
         "total": len(listings),
         "page": page,

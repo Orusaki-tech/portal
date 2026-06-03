@@ -12,19 +12,21 @@ from backend.engine.domain.models import (
     ConfidenceScore,
     GridStatus,
     Initiative,
+    InitiativeStatus,
     Polygon,
     QaStatus,
     TaskGrid,
     User,
     VertexMetric,
 )
-from backend.engine.domain.models import InitiativeStatus
 
 
 class TestPolygon:
     def test_high_confidence_validation(self) -> None:
         polygon = Polygon(
-            id=uuid4(), task_grid_id=uuid4(), polygon_set_id=uuid4(),
+            id=uuid4(),
+            task_grid_id=uuid4(),
+            polygon_set_id=uuid4(),
             original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         score = ConfidenceScore(
@@ -42,7 +44,9 @@ class TestPolygon:
 
     def test_low_confidence_validation(self) -> None:
         polygon = Polygon(
-            id=uuid4(), task_grid_id=uuid4(), polygon_set_id=uuid4(),
+            id=uuid4(),
+            task_grid_id=uuid4(),
+            polygon_set_id=uuid4(),
             original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         score = ConfidenceScore(
@@ -60,7 +64,9 @@ class TestPolygon:
 
     def test_correction_updates_status(self) -> None:
         polygon = Polygon(
-            id=uuid4(), task_grid_id=uuid4(), polygon_set_id=uuid4(),
+            id=uuid4(),
+            task_grid_id=uuid4(),
+            polygon_set_id=uuid4(),
             original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         new_geom = "POLYGON((0 0, 2 0, 2 1, 0 1, 0 0))"
@@ -70,7 +76,9 @@ class TestPolygon:
 
     def test_escalation(self) -> None:
         polygon = Polygon(
-            id=uuid4(), task_grid_id=uuid4(), polygon_set_id=uuid4(),
+            id=uuid4(),
+            task_grid_id=uuid4(),
+            polygon_set_id=uuid4(),
             original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         polygon.escalate()
@@ -109,7 +117,8 @@ class TestConfidenceScore:
 class TestTaskGrid:
     def test_lock_sets_status_and_user(self) -> None:
         grid = TaskGrid(
-            id=uuid4(), initiative_id=uuid4(),
+            id=uuid4(),
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         user_id = uuid4()
@@ -120,7 +129,8 @@ class TestTaskGrid:
 
     def test_cannot_lock_completed_grid(self) -> None:
         grid = TaskGrid(
-            id=uuid4(), initiative_id=uuid4(),
+            id=uuid4(),
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         grid.lock(uuid4())
@@ -131,7 +141,8 @@ class TestTaskGrid:
 
     def test_release_returns_to_pending(self) -> None:
         grid = TaskGrid(
-            id=uuid4(), initiative_id=uuid4(),
+            id=uuid4(),
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         grid.lock(uuid4())
@@ -142,7 +153,8 @@ class TestTaskGrid:
 
     def test_submit_review(self) -> None:
         grid = TaskGrid(
-            id=uuid4(), initiative_id=uuid4(),
+            id=uuid4(),
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         grid.lock(uuid4())
@@ -151,7 +163,8 @@ class TestTaskGrid:
 
     def test_complete_emits_event(self) -> None:
         grid = TaskGrid(
-            id=uuid4(), initiative_id=uuid4(),
+            id=uuid4(),
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         grid.lock(uuid4())
@@ -167,7 +180,8 @@ class TestTaskGrid:
 
     def test_dispute_sets_notes(self) -> None:
         grid = TaskGrid(
-            id=uuid4(), initiative_id=uuid4(),
+            id=uuid4(),
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         grid.lock(uuid4())
@@ -180,35 +194,49 @@ class TestTaskGrid:
 class TestUser:
     def test_deduct_credits(self) -> None:
         from decimal import Decimal
+
         user = User(
-            id=uuid4(), email="test@test.com", name="Test",
-            role="annotator", credits_remaining=Decimal("100"),
+            id=uuid4(),
+            email="test@test.com",
+            name="Test",
+            role="annotator",
+            credits_remaining=Decimal("100"),
         )
         user.deduct_credits(Decimal("25"))
         assert user.credits_remaining == Decimal("75")
 
     def test_deduct_insufficient_credits_raises(self) -> None:
         from decimal import Decimal
+
         user = User(
-            id=uuid4(), email="test@test.com", name="Test",
-            role="annotator", credits_remaining=Decimal("10"),
+            id=uuid4(),
+            email="test@test.com",
+            name="Test",
+            role="annotator",
+            credits_remaining=Decimal("10"),
         )
         with pytest.raises(ValueError, match="Insufficient credits"):
             user.deduct_credits(Decimal("25"))
 
     def test_negative_credits_on_create_raises(self) -> None:
         from decimal import Decimal
+
         with pytest.raises(ValueError):
             User(
-                id=uuid4(), email="test@test.com", name="Test",
-                role="annotator", credits_remaining=Decimal("-5"),
+                id=uuid4(),
+                email="test@test.com",
+                name="Test",
+                role="annotator",
+                credits_remaining=Decimal("-5"),
             )
 
 
 class TestInitiative:
     def test_activate(self) -> None:
         initiative = Initiative(
-            id=uuid4(), owner_id=uuid4(), name="Test Initiative",
+            id=uuid4(),
+            owner_id=uuid4(),
+            name="Test Initiative",
             region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         initiative.activate()
@@ -216,7 +244,9 @@ class TestInitiative:
 
     def test_cannot_activate_active_initiative(self) -> None:
         initiative = Initiative(
-            id=uuid4(), owner_id=uuid4(), name="Test Initiative",
+            id=uuid4(),
+            owner_id=uuid4(),
+            name="Test Initiative",
             region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         initiative.activate()
@@ -225,7 +255,9 @@ class TestInitiative:
 
     def test_complete_sets_timestamp(self) -> None:
         initiative = Initiative(
-            id=uuid4(), owner_id=uuid4(), name="Test Initiative",
+            id=uuid4(),
+            owner_id=uuid4(),
+            name="Test Initiative",
             region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         initiative.complete()

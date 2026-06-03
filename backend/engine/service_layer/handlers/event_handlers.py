@@ -8,7 +8,6 @@ from backend.engine.domain.events import (
     BoundaryCorrected,
     CreditsExhausted,
     ExportCompleted,
-    InitiativeCompleted,
     LowConfidenceDetected,
     PolygonValidated,
 )
@@ -18,9 +17,7 @@ from backend.engine.service_layer.unit_of_work import UnitOfWork
 logger = logging.getLogger(__name__)
 
 
-def handle_request_export(
-    cmd: RequestExport, uow: UnitOfWork
-) -> dict:
+def handle_request_export(cmd: RequestExport, uow: UnitOfWork) -> dict:
     user = uow.user_repo.get(cmd.user_id)
     if user is None:
         raise ValueError(f"User {cmd.user_id} not found")
@@ -57,57 +54,30 @@ def handle_request_export(
     }
 
 
-def handle_classify_confidence(
-    event: PolygonValidated, uow: UnitOfWork
-) -> None:
-    logger.info(
-        f"Polygon {event.polygon_id} validated with confidence {event.confidence}"
-    )
+def handle_classify_confidence(event: PolygonValidated, uow: UnitOfWork) -> None:
+    logger.info(f"Polygon {event.polygon_id} validated with confidence {event.confidence}")
 
 
-def handle_low_confidence_trigger(
-    event: PolygonValidated, uow: UnitOfWork
-) -> None:
+def handle_low_confidence_trigger(event: PolygonValidated, uow: UnitOfWork) -> None:
     if event.is_ambiguous:
-        logger.info(
-            f"Polygon {event.polygon_id} flagged low confidence ({event.confidence})"
-        )
+        logger.info(f"Polygon {event.polygon_id} flagged low confidence ({event.confidence})")
 
 
-def handle_flag_for_review(
-    event: LowConfidenceDetected, uow: UnitOfWork
-) -> None:
-    logger.info(
-        f"Polygon {event.polygon_id} flagged for review "
-        f"(confidence: {event.confidence})"
-    )
+def handle_flag_for_review(event: LowConfidenceDetected, uow: UnitOfWork) -> None:
+    logger.info(f"Polygon {event.polygon_id} flagged for review (confidence: {event.confidence})")
 
 
-def handle_update_geometry(
-    event: BoundaryCorrected, uow: UnitOfWork
-) -> None:
-    logger.info(
-        f"Polygon {event.polygon_id} geometry updated by user {event.user_id}"
-    )
+def handle_update_geometry(event: BoundaryCorrected, uow: UnitOfWork) -> None:
+    logger.info(f"Polygon {event.polygon_id} geometry updated by user {event.user_id}")
 
 
-def handle_deduct_credits(
-    event: BoundaryCorrected, uow: UnitOfWork
-) -> None:
-    logger.info(
-        f"Credits consumed for correction of polygon {event.polygon_id}"
-    )
+def handle_deduct_credits(event: BoundaryCorrected, uow: UnitOfWork) -> None:
+    logger.info(f"Credits consumed for correction of polygon {event.polygon_id}")
 
 
-def handle_credits_exhausted(
-    event: CreditsExhausted, uow: UnitOfWork
-) -> None:
+def handle_credits_exhausted(event: CreditsExhausted, uow: UnitOfWork) -> None:
     logger.warning(f"User {event.user_id} has exhausted credits — validation paused")
 
 
-def handle_notify_export_complete(
-    event: ExportCompleted, uow: UnitOfWork
-) -> None:
-    logger.info(
-        f"Export {event.export_id} completed for user {event.user_id}: {event.output_url}"
-    )
+def handle_notify_export_complete(event: ExportCompleted, uow: UnitOfWork) -> None:
+    logger.info(f"Export {event.export_id} completed for user {event.user_id}: {event.output_url}")

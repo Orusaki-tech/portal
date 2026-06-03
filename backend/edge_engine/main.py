@@ -12,27 +12,25 @@ Workflow:
   3. Trigger dbt run to materialize updated QA statuses
 """
 
-import os
 import json
+import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import numpy as np
-from rio_tiler.io import COGReader
-from shapely.geometry import shape, Polygon
-
-from stac_client import find_best_imagery_for_polygon
-from edge_detector import (
-    enhance_contrast,
-    cluster_pixels,
-    active_contour_snake,
-    measure_deviation,
-    compute_spectral_contrast,
-)
 from confidence_scorer import compute_confidence, is_ambiguous
+from edge_detector import (
+    active_contour_snake,
+    cluster_pixels,
+    compute_spectral_contrast,
+    enhance_contrast,
+    measure_deviation,
+)
 from models.schemas import EdgeResult, VertexMetric
-
+from rio_tiler.io import COGReader
+from shapely.geometry import Polygon, shape
+from stac_client import find_best_imagery_for_polygon
 
 DB_DSN = os.getenv("DB_DSN", "")
 DBT_API_URL = os.getenv("DBT_API_URL", "")
@@ -51,10 +49,10 @@ def extract_buffer_around_polygon(
     poly = shape(polygon_geometry)
     buffered = poly.buffer(buffer_meters)
     boundary_only = Polygon(buffered.exterior)  # thin strip
-    
+
     with COGReader(cog_url) as cog:
         img = cog.feature(boundary_only.__geointerface__)
-    
+
     return img.data, img.transform
 
 
@@ -82,7 +80,7 @@ def process_single_polygon(
             confidence_avg=0.0,
             vertices=[],
         )
-    
+
     # 2. Extract pixel buffer
     try:
         pixel_data, transform = extract_buffer_around_polygon(
@@ -96,7 +94,7 @@ def process_single_polygon(
             confidence_avg=0.0,
             vertices=[],
         )
-    
+
     # Handle single-band vs multi-band
     if pixel_data.ndim == 2:
         pixel_matrix = np.stack([pixel_data] * 3, axis=-1)
@@ -104,32 +102,30 @@ def process_single_polygon(
         pixel_matrix = np.stack([pixel_data[0]] * 3, axis=-1)
     else:
         pixel_matrix = np.moveaxis(pixel_data[:3], 0, -1)
-    
+
     # 3. Edge detection pipeline
     enhanced = enhance_contrast(pixel_matrix)
     clustered = cluster_pixels(enhanced, n_clusters=3)
     spectral_contrast = compute_spectral_contrast(pixel_matrix, clustered)
-    
+
     # 4. Active contour snake
     boundary_vertices = extract_boundary_vertices(geometry)
-    
-    h, w = pixel_matrix.shape[:2]
-    center_y, center_x = h // 2, w // 2
+
     initial_contour = boundary_vertices.copy()
-    
+
     try:
         snake = active_contour_snake(enhanced, initial_contour)
     except Exception:
         snake = initial_contour
-    
+
     # 5. Measure deviation
     mean_deviation, vertex_distances = measure_deviation(initial_contour, snake)
-    
+
     poly_shape = shape(geometry)
     perimeter = poly_shape.length
-    
+
     total_movement = float(np.sum(np.linalg.norm(snake - initial_contour, axis=1)))
-    
+
     # 6. Confidence score
     confidence = compute_confidence(
         spectral_contrast=spectral_contrast,
@@ -138,59 +134,71 @@ def process_single_polygon(
         mean_deviation=mean_deviation,
         buffer_width_meters=buffer_meters,
     )
-    
+
     ambiguous = is_ambiguous(confidence, confidence_threshold)
-    
+
     # 7. Build vertex metrics
     vertices = []
     for i in range(len(vertex_distances)):
-        vertices.append(VertexMetric(
-            vertex_index=i,
-            deviation_meters=float(vertex_distances[i]),
-            spectral_contrast=spectral_contrast,
-            snake_strain=total_movement / max(perimeter, 1e-6),
-            confidence_score=confidence,
-        ))
-    
+        vertices.append(
+            VertexMetric(
+                vertex_index=i,
+                deviation_meters=float(vertex_distances[i]),
+                spectral_contrast=spectral_contrast,
+                snake_strain=total_movement / max(perimeter, 1e-6),
+                confidence_score=confidence,
+            )
+        )
+
     return EdgeResult(
         polygon_id=polygon_id,
         run_id=run_id,
         is_ambiguous=ambiguous,
         confidence_avg=confidence,
         vertices=vertices,
-        processed_at=datetime.now(timezone.utc),
+        processed_at=datetime.now(UTC),
     )
 
 
 def write_results_to_db(results: list[EdgeResult], db_dsn: str):
     """Batch insert edge metrics into Cloud SQL."""
     import psycopg2
-    
+
     conn = psycopg2.connect(db_dsn)
     cur = conn.cursor()
-    
+
     for result in results:
         for vertex in result.vertices:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO edge_metrics (polygon_id, run_id, vertex_index,
                     deviation_meters, spectral_contrast, snake_strain,
                     confidence_score, is_ambiguous)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                result.polygon_id, result.run_id, vertex.vertex_index,
-                vertex.deviation_meters, vertex.spectral_contrast,
-                vertex.snake_strain, vertex.confidence_score,
-                result.is_ambiguous,
-            ))
+            """,
+                (
+                    result.polygon_id,
+                    result.run_id,
+                    vertex.vertex_index,
+                    vertex.deviation_meters,
+                    vertex.spectral_contrast,
+                    vertex.snake_strain,
+                    vertex.confidence_score,
+                    result.is_ambiguous,
+                ),
+            )
 
         qa_status = "low_confidence" if result.is_ambiguous else "validated"
-        cur.execute("""
+        cur.execute(
+            """
             UPDATE ml_polygons
             SET confidence_avg = %s,
                 qa_status = %s
             WHERE id = %s
-        """, (result.confidence_avg, qa_status, result.polygon_id))
-    
+        """,
+            (result.confidence_avg, qa_status, result.polygon_id),
+        )
+
     conn.commit()
     cur.close()
     conn.close()
@@ -200,7 +208,7 @@ def trigger_dbt_run():
     """Trigger dbt Cloud job to refresh materialized models."""
     if not DBT_API_URL or not DBT_API_KEY:
         return
-    
+
     with httpx.Client() as client:
         client.post(
             f"{DBT_API_URL}/api/v2/account/12345/run/",
@@ -210,12 +218,11 @@ def trigger_dbt_run():
 
 
 def main():
-    import sys
-    
+
     input_json = os.getenv("INPUT_POLYGONS", "[]")
     run_id = os.getenv("RUN_ID", str(uuid.uuid4()))
     polygons = json.loads(input_json)
-    
+
     results = []
     for poly in polygons:
         result = process_single_polygon(
@@ -224,12 +231,13 @@ def main():
             run_id=run_id,
         )
         results.append(result)
-    
+
     write_results_to_db(results, DB_DSN)
     trigger_dbt_run()
-    
-    print(f"Processed {len(results)} polygons. "
-          f"Ambiguous: {sum(1 for r in results if r.is_ambiguous)}")
+
+    print(
+        f"Processed {len(results)} polygons. Ambiguous: {sum(1 for r in results if r.is_ambiguous)}"
+    )
 
 
 if __name__ == "__main__":

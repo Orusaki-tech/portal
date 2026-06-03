@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -20,7 +20,7 @@ class PolygonValidated(Event):
 
     def __init__(self, polygon_id: UUID, confidence: float, is_ambiguous: bool) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "polygon_id", polygon_id)
         object.__setattr__(self, "confidence", confidence)
         object.__setattr__(self, "is_ambiguous", is_ambiguous)
@@ -33,7 +33,7 @@ class LowConfidenceDetected(Event):
 
     def __init__(self, polygon_id: UUID, confidence: float) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "polygon_id", polygon_id)
         object.__setattr__(self, "confidence", confidence)
 
@@ -46,7 +46,7 @@ class BoundaryCorrected(Event):
 
     def __init__(self, polygon_id: UUID, user_id: UUID, new_geometry: str) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "polygon_id", polygon_id)
         object.__setattr__(self, "user_id", user_id)
         object.__setattr__(self, "new_geometry", new_geometry)
@@ -59,7 +59,7 @@ class GridBlockLocked(Event):
 
     def __init__(self, grid_id: UUID, user_id: UUID) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "grid_id", grid_id)
         object.__setattr__(self, "user_id", user_id)
 
@@ -71,7 +71,7 @@ class GridBlockSubmitted(Event):
 
     def __init__(self, grid_id: UUID, user_id: UUID) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "grid_id", grid_id)
         object.__setattr__(self, "user_id", user_id)
 
@@ -84,7 +84,7 @@ class GridBlockDisputed(Event):
 
     def __init__(self, grid_id: UUID, reviewer_id: UUID, notes: str) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "grid_id", grid_id)
         object.__setattr__(self, "reviewer_id", reviewer_id)
         object.__setattr__(self, "notes", notes)
@@ -97,7 +97,7 @@ class GridBlockCompleted(Event):
 
     def __init__(self, grid_id: UUID, initiative_id: UUID) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "grid_id", grid_id)
         object.__setattr__(self, "initiative_id", initiative_id)
 
@@ -109,7 +109,7 @@ class InitiativeCompleted(Event):
 
     def __init__(self, initiative_id: UUID, owner_id: UUID) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "initiative_id", initiative_id)
         object.__setattr__(self, "owner_id", owner_id)
 
@@ -120,7 +120,7 @@ class CreditsExhausted(Event):
 
     def __init__(self, user_id: UUID) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "user_id", user_id)
 
 
@@ -133,7 +133,7 @@ class ExportCompleted(Event):
 
     def __init__(self, export_id: UUID, user_id: UUID, format: str, output_url: str) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "export_id", export_id)
         object.__setattr__(self, "user_id", user_id)
         object.__setattr__(self, "format", format)
@@ -148,7 +148,7 @@ class ConsensusReached(Event):
 
     def __init__(self, polygon_id: UUID, merged_geometry: str, annotation_count: int) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "polygon_id", polygon_id)
         object.__setattr__(self, "merged_geometry", merged_geometry)
         object.__setattr__(self, "annotation_count", annotation_count)
@@ -161,9 +161,11 @@ class DatasetPurchased(Event):
     dataset_id: UUID
     tokens_paid: Decimal
 
-    def __init__(self, listing_id: UUID, buyer_id: UUID, dataset_id: UUID, tokens_paid: Decimal) -> None:
+    def __init__(
+        self, listing_id: UUID, buyer_id: UUID, dataset_id: UUID, tokens_paid: Decimal
+    ) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "listing_id", listing_id)
         object.__setattr__(self, "buyer_id", buyer_id)
         object.__setattr__(self, "dataset_id", dataset_id)
@@ -177,7 +179,7 @@ class HackathonJoined(Event):
 
     def __init__(self, initiative_id: UUID, user_id: UUID) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "initiative_id", initiative_id)
         object.__setattr__(self, "user_id", user_id)
 
@@ -190,7 +192,7 @@ class HackathonScoreUpdated(Event):
 
     def __init__(self, initiative_id: UUID, user_id: UUID, score: float) -> None:
         object.__setattr__(self, "event_id", uuid4())
-        object.__setattr__(self, "timestamp", datetime.now(timezone.utc))
+        object.__setattr__(self, "timestamp", datetime.now(UTC))
         object.__setattr__(self, "initiative_id", initiative_id)
         object.__setattr__(self, "user_id", user_id)
         object.__setattr__(self, "score", score)

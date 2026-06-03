@@ -3,11 +3,10 @@ from __future__ import annotations
 import logging
 import math
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import uuid4
 
+from pyproj import Transformer
 from shapely import wkt as shapely_wkt
-from shapely.ops import transform
-from pyproj import CRS, Transformer
 
 from backend.engine.domain.commands import (
     ApproveGridBlock,
@@ -32,9 +31,7 @@ from backend.engine.service_layer.unit_of_work import UnitOfWork
 logger = logging.getLogger(__name__)
 
 
-def handle_lock_grid_block(
-    cmd: LockGridBlock, uow: UnitOfWork
-) -> dict:
+def handle_lock_grid_block(cmd: LockGridBlock, uow: UnitOfWork) -> dict:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is None:
         raise ValueError(f"Grid {cmd.grid_id} not found")
@@ -49,9 +46,7 @@ def handle_lock_grid_block(
     }
 
 
-def handle_claim_grid_block(
-    cmd: ClaimGridBlock, uow: UnitOfWork
-) -> dict:
+def handle_claim_grid_block(cmd: ClaimGridBlock, uow: UnitOfWork) -> dict:
     grids = uow.grid_repo.get_by_initiative(cmd.initiative_id)
     available = [g for g in grids if g.status.value == "pending"]
     if not available:
@@ -68,9 +63,7 @@ def handle_claim_grid_block(
     }
 
 
-def handle_submit_grid_block(
-    cmd: SubmitGridBlock, uow: UnitOfWork
-) -> dict:
+def handle_submit_grid_block(cmd: SubmitGridBlock, uow: UnitOfWork) -> dict:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is None:
         raise ValueError(f"Grid {cmd.grid_id} not found")
@@ -84,9 +77,7 @@ def handle_submit_grid_block(
     }
 
 
-def handle_approve_grid_block(
-    cmd: ApproveGridBlock, uow: UnitOfWork
-) -> dict:
+def handle_approve_grid_block(cmd: ApproveGridBlock, uow: UnitOfWork) -> dict:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is None:
         raise ValueError(f"Grid {cmd.grid_id} not found")
@@ -105,9 +96,7 @@ def handle_approve_grid_block(
     }
 
 
-def handle_dispute_grid_block(
-    cmd: DisputeGridBlock, uow: UnitOfWork
-) -> dict:
+def handle_dispute_grid_block(cmd: DisputeGridBlock, uow: UnitOfWork) -> dict:
     grid = uow.grid_repo.get(cmd.grid_id)
     if grid is None:
         raise ValueError(f"Grid {cmd.grid_id} not found")
@@ -119,7 +108,9 @@ def handle_dispute_grid_block(
         raise ValueError(f"User {cmd.reviewer_id} is not authorized to dispute grids")
 
     grid.dispute(cmd.notes)
-    grid.raise_event(GridBlockDisputed(grid_id=cmd.grid_id, reviewer_id=cmd.reviewer_id, notes=cmd.notes))
+    grid.raise_event(
+        GridBlockDisputed(grid_id=cmd.grid_id, reviewer_id=cmd.reviewer_id, notes=cmd.notes)
+    )
 
     return {
         "grid_id": str(cmd.grid_id),
@@ -127,9 +118,7 @@ def handle_dispute_grid_block(
     }
 
 
-def handle_bulk_assign_grid_blocks(
-    cmd: BulkAssignGridBlocks, uow: UnitOfWork
-) -> dict:
+def handle_bulk_assign_grid_blocks(cmd: BulkAssignGridBlocks, uow: UnitOfWork) -> dict:
     assigned = 0
     for grid_id in cmd.grid_ids:
         grid = uow.grid_repo.get(grid_id)
@@ -145,9 +134,7 @@ def handle_bulk_assign_grid_blocks(
     }
 
 
-def handle_generate_grid_blocks(
-    cmd: GenerateGridBlocks, uow: UnitOfWork
-) -> dict:
+def handle_generate_grid_blocks(cmd: GenerateGridBlocks, uow: UnitOfWork) -> dict:
     initiative = uow.initiative_repo.get(cmd.initiative_id)
     if initiative is None:
         raise ValueError(f"Initiative {cmd.initiative_id} not found")
@@ -177,10 +164,10 @@ def handle_generate_grid_blocks(
         while lon < max_lon:
             cell_lon = min(lon + lon_step, max_lon)
             cell_lat = min(lat + grid_size_deg, max_lat)
-            
+
             (x, y) = transformer.transform(lon, lat)
             (cell_x, cell_y) = transformer.transform(cell_lon, cell_lat)
-            
+
             wkt = f"POLYGON(({x} {y}, {cell_x} {y}, {cell_x} {cell_y}, {x} {cell_y}, {x} {y}))"
             grid = TaskGrid(
                 id=uuid4(),
@@ -198,17 +185,11 @@ def handle_generate_grid_blocks(
     }
 
 
-def handle_check_grid_complete(
-    event: BoundaryCorrected, uow: UnitOfWork
-) -> None:
-    logger.info(
-        f"Checking if grid is complete after polygon {event.polygon_id} correction"
-    )
+def handle_check_grid_complete(event: BoundaryCorrected, uow: UnitOfWork) -> None:
+    logger.info(f"Checking if grid is complete after polygon {event.polygon_id} correction")
 
 
-def handle_check_initiative_complete(
-    event: GridBlockCompleted, uow: UnitOfWork
-) -> None:
+def handle_check_initiative_complete(event: GridBlockCompleted, uow: UnitOfWork) -> None:
     logger.info(
         f"Checking if initiative {event.initiative_id} is complete after grid {event.grid_id}"
     )

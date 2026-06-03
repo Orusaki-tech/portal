@@ -2,18 +2,19 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from shapely.geometry import Polygon, shape
 from pystac_client import Client as StacClient
+from shapely.geometry import Polygon, shape
 
 
 class AbstractStacClient(ABC):
     @abstractmethod
-    def find_best_imagery_for_polygon(self, geometry: Polygon) -> str | None:
-        ...
+    def find_best_imagery_for_polygon(self, geometry: Polygon) -> str | None: ...
 
 
 class PystacClient(AbstractStacClient):
-    def __init__(self, stac_url: str = "https://planetarycomputer.microsoft.com/api/stac/v1") -> None:
+    def __init__(
+        self, stac_url: str = "https://planetarycomputer.microsoft.com/api/stac/v1"
+    ) -> None:
         self._stac_url = stac_url
 
     def find_best_imagery_for_polygon(self, geometry: Polygon) -> str | None:

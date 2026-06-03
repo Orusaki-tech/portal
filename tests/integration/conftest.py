@@ -22,7 +22,7 @@ def _apply_migrations(conn: psycopg2.extensions.connection, schema: str) -> None
 
 
 @pytest.fixture(scope="function")
-def migrated_schema(db_conn: psycopg2.extensions.connection) -> Generator[str, None, None]:
+def migrated_schema(db_conn: psycopg2.extensions.connection) -> Generator[str]:
     schema = f"test_realitysync_{uuid4().hex[:8]}"
     with db_conn.cursor() as cur:
         cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
@@ -84,8 +84,7 @@ def seeded_polygon_set_id(
     with db_conn.cursor() as cur:
         cur.execute(f"SET search_path TO {migrated_schema}, public")
         cur.execute(
-            "INSERT INTO ml_polygon_sets (id, user_id, name) "
-            "VALUES (%s, %s, %s)",
+            "INSERT INTO ml_polygon_sets (id, user_id, name) VALUES (%s, %s, %s)",
             (ps_id, seeded_user_id, "Test Polygon Set"),
         )
     return ps_id
@@ -95,7 +94,7 @@ def seeded_polygon_set_id(
 def pg_uow(
     db_conn: psycopg2.extensions.connection,
     migrated_schema: str,
-) -> Generator[PostgresUnitOfWork, None, None]:
+) -> Generator[PostgresUnitOfWork]:
     def _factory() -> psycopg2.extensions.connection:
         c = psycopg2.connect(
             host=db_conn.info.host,

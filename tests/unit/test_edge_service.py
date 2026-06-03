@@ -1,5 +1,3 @@
-import pytest
-
 from backend.engine.service_layer.edge_service import (
     _heuristic_confidence,
     _wkt_to_coords,
@@ -17,23 +15,17 @@ class TestWktToCoords:
 
 class TestHeuristicConfidence:
     def test_perfect_square_high_confidence(self) -> None:
-        confidence, ambiguous = _heuristic_confidence(
-            "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"
-        )
+        confidence, ambiguous = _heuristic_confidence("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")
         assert 0.70 <= confidence <= 1.0
         assert not ambiguous
 
     def test_sliver_low_confidence(self) -> None:
-        confidence, ambiguous = _heuristic_confidence(
-            "POLYGON((0 0, 1 0, 1 0.001, 0 0.001, 0 0))"
-        )
+        confidence, ambiguous = _heuristic_confidence("POLYGON((0 0, 1 0, 1 0.001, 0 0.001, 0 0))")
         assert confidence < 0.70
         assert ambiguous
 
     def test_degenerate_returns_zero(self) -> None:
-        confidence, ambiguous = _heuristic_confidence(
-            "POLYGON((0 0, 1 0, 0 0))"
-        )
+        confidence, ambiguous = _heuristic_confidence("POLYGON((0 0, 1 0, 0 0))")
         assert confidence == 0.0
         assert ambiguous
 

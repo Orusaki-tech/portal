@@ -1,11 +1,12 @@
-import pytest
 from uuid import uuid4
+
+import pytest
 from shapely import wkt
 
 from backend.engine.service_layer.consensus import (
-    merge_annotations,
-    _merge_two,
     _merge_many,
+    _merge_two,
+    merge_annotations,
 )
 
 
@@ -42,7 +43,9 @@ class TestMergeMany:
         ]
         result = _merge_many(wkts)
         poly = wkt.loads(result)
-        assert poly.area == 1.0  # median of [(0,0), (1,0)], [(0,0), (2,0)], [(0,0), (1,0)] = (0,0), (1,0)
+        assert (
+            poly.area == 1.0
+        )  # median of [(0,0), (1,0)], [(0,0), (2,0)], [(0,0), (1,0)] = (0,0), (1,0)
 
     def test_different_vertex_counts(self) -> None:
         wkts = [
@@ -51,6 +54,7 @@ class TestMergeMany:
         ]
         result = _merge_many(wkts)
         from shapely import wkt as swkt
+
         poly = swkt.loads(result)
         assert poly.area == 1.0
 
@@ -65,18 +69,22 @@ class TestMergeAnnotations:
         assert result == "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"
 
     def test_two_dispatches_to_merge_two(self) -> None:
-        result = merge_annotations([
-            (uuid4(), "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))"),
-            (uuid4(), "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))"),
-        ])
+        result = merge_annotations(
+            [
+                (uuid4(), "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))"),
+                (uuid4(), "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))"),
+            ]
+        )
         poly = wkt.loads(result)
         assert poly.area > 0
 
     def test_three_dispatches_to_merge_many(self) -> None:
-        result = merge_annotations([
-            (uuid4(), "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"),
-            (uuid4(), "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"),
-            (uuid4(), "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"),
-        ])
+        result = merge_annotations(
+            [
+                (uuid4(), "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"),
+                (uuid4(), "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"),
+                (uuid4(), "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"),
+            ]
+        )
         poly = wkt.loads(result)
         assert poly.area == 1.0

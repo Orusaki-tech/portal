@@ -21,17 +21,13 @@ def test_stac_client_returns_naip_for_austin_area() -> None:
     )
     result = client.find_best_imagery_for_polygon(AUSTIN_BUILDING)
     assert result is not None, "Expected to find NAIP imagery for Austin, TX area"
-    assert result.startswith("naip/"), (
-        f"Expected NAIP collection item, got {result}"
-    )
+    assert result.startswith("naip/"), f"Expected NAIP collection item, got {result}"
 
 
 @pytest.mark.integration
 def test_stac_client_returns_none_for_ocean_polygon() -> None:
     """STAC client should return None for a polygon in the middle of the Pacific."""
-    ocean_point = wkt.loads(
-        "POLYGON((-179.9 0.1, -179.8 0.1, -179.8 0.2, -179.9 0.2, -179.9 0.1))"
-    )
+    ocean_point = wkt.loads("POLYGON((-179.9 0.1, -179.8 0.1, -179.8 0.2, -179.9 0.2, -179.9 0.1))")
     client: AbstractStacClient = PystacClient(
         stac_url="https://planetarycomputer.microsoft.com/api/stac/v1",
     )

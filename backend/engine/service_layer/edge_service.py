@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 _PIPELINE_AVAILABLE = False
 try:
     import numpy as np
+
     from backend.edge_engine.confidence_scorer import compute_confidence, is_ambiguous
+
     _PIPELINE_AVAILABLE = True
 except ImportError:
     logger.info("Heavy edge deps not available — using heuristic validation")
@@ -97,13 +99,12 @@ def _run_pipeline(geometry: str, imagery_source: str) -> dict:
         confidence, ambiguous = _heuristic_confidence(geometry)
         return {"confidence_avg": confidence, "is_ambiguous": ambiguous, "source": "heuristic"}
 
-    from rio_tiler.io import COGReader
     from backend.edge_engine.edge_detector import (
-        enhance_contrast,
-        cluster_pixels,
         active_contour_snake,
-        measure_deviation,
+        cluster_pixels,
         compute_spectral_contrast,
+        enhance_contrast,
+        measure_deviation,
     )
 
     try:
@@ -151,6 +152,8 @@ def _extract_buffer(
     poly = shape(polygon_geometry)
     buffered = poly.buffer(buffer_meters)
     boundary_only = Polygon(buffered.exterior)
+
+    from rio_tiler.io import Reader as COGReader
 
     with COGReader(cog_url) as cog:
         img = cog.feature(boundary_only.__geointerface__)

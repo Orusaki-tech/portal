@@ -13,6 +13,7 @@ PRODUCTION_BUCKET = "realitysync-cogs"
 
 try:
     from google.cloud import storage as gcs
+
     _GCS_AVAILABLE = True
 except ImportError:
     _GCS_AVAILABLE = False
@@ -81,11 +82,17 @@ def process_imagery_upload_message(message: dict) -> None:
 
         subprocess.run(
             [
-                "gdalwarp", raw_path, warped_path,
-                "-t_srs", "EPSG:3857",
-                "-r", "bilinear",
-                "-co", "COMPRESS=DEFLATE",
-                "-co", "BIGTIFF=IF_SAFER",
+                "gdalwarp",
+                raw_path,
+                warped_path,
+                "-t_srs",
+                "EPSG:3857",
+                "-r",
+                "bilinear",
+                "-co",
+                "COMPRESS=DEFLATE",
+                "-co",
+                "BIGTIFF=IF_SAFER",
             ],
             check=True,
         )
@@ -93,12 +100,19 @@ def process_imagery_upload_message(message: dict) -> None:
 
         subprocess.run(
             [
-                "gdal_translate", warped_path, cog_path,
-                "-of", "COG",
-                "-co", "COMPRESS=DEFLATE",
-                "-co", "BLOCKSIZE=512",
-                "-co", "OVERVIEWS=IGNORE_EXISTING",
-                "-co", "RESAMPLING=LANCZOS",
+                "gdal_translate",
+                warped_path,
+                cog_path,
+                "-of",
+                "COG",
+                "-co",
+                "COMPRESS=DEFLATE",
+                "-co",
+                "BLOCKSIZE=512",
+                "-co",
+                "OVERVIEWS=IGNORE_EXISTING",
+                "-co",
+                "RESAMPLING=LANCZOS",
             ],
             check=True,
         )

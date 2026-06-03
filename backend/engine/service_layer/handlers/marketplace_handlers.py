@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from backend.engine.domain.commands import ListDatasetForSale, PurchaseDataset
 from backend.engine.domain.events import DatasetPurchased
-from backend.engine.domain.models import MarketplaceListing, DatasetPurchase, QaStatus
+from backend.engine.domain.models import DatasetPurchase, MarketplaceListing, QaStatus
 from backend.engine.service_layer.unit_of_work import UnitOfWork
 
 logger = logging.getLogger(__name__)
 
 
-def handle_list_dataset_for_sale(
-    cmd: ListDatasetForSale, uow: UnitOfWork
-) -> dict:
+def handle_list_dataset_for_sale(cmd: ListDatasetForSale, uow: UnitOfWork) -> dict:
     seller = uow.user_repo.get(cmd.seller_id)
     if seller is None:
         raise ValueError(f"User {cmd.seller_id} not found")
@@ -51,9 +48,7 @@ def handle_list_dataset_for_sale(
     }
 
 
-def handle_purchase_dataset(
-    cmd: PurchaseDataset, uow: UnitOfWork
-) -> dict:
+def handle_purchase_dataset(cmd: PurchaseDataset, uow: UnitOfWork) -> dict:
     listing = uow.marketplace_repo.get_listing(cmd.listing_id)
     if listing is None:
         raise ValueError(f"Listing {cmd.listing_id} not found")
@@ -78,7 +73,7 @@ def handle_purchase_dataset(
     uow.marketplace_repo.set_listing_status(cmd.listing_id, "sold")
 
     grid = uow.grid_repo.get(listing.dataset_id)
-    for polygon in (grid.polygons if grid else []):
+    for polygon in grid.polygons if grid else []:
         polygon.qa_status = QaStatus.PENDING
 
     buyer.raise_event(

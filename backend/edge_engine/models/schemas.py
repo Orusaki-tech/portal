@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Any
 from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 
 class PolygonInput(BaseModel):
@@ -28,13 +28,13 @@ class EdgeResult(BaseModel):
 
 class STACQuery(BaseModel):
     bbox: list[float]  # [west, south, east, north]
-    datetime: Optional[str] = None
+    datetime: str | None = None
     collections: list[str] = ["naip"]
     limit: int = 5
 
 
 class ValidationRunRequest(BaseModel):
     polygon_set_id: str
-    imagery_id: Optional[str] = None
-    region: Optional[dict] = None
+    imagery_id: str | None = None
+    region: dict | None = None
     confidence_threshold: float = 0.7

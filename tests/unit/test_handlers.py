@@ -36,13 +36,18 @@ class TestValidatePolygon:
         polygon_id = uuid4()
         grid_id = uuid4()
         user_id = uuid4()
-        user = User(id=user_id, email="test@test.com", name="Test", role="annotator", credits_remaining=100)
+        user = User(
+            id=user_id, email="test@test.com", name="Test", role="annotator", credits_remaining=100
+        )
         grid = TaskGrid(
-            id=grid_id, initiative_id=uuid4(),
+            id=grid_id,
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
             polygons=[
                 Polygon(
-                    id=polygon_id, task_grid_id=grid_id, polygon_set_id=uuid4(),
+                    id=polygon_id,
+                    task_grid_id=grid_id,
+                    polygon_set_id=uuid4(),
                     original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
                 )
             ],
@@ -63,20 +68,21 @@ class TestValidatePolygon:
         polygon_id = uuid4()
         grid_id = uuid4()
         grid = TaskGrid(
-            id=grid_id, initiative_id=uuid4(),
+            id=grid_id,
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 0.001, 0 0.001, 0 0))",
             polygons=[
                 Polygon(
-                    id=polygon_id, task_grid_id=grid_id, polygon_set_id=uuid4(),
+                    id=polygon_id,
+                    task_grid_id=grid_id,
+                    polygon_set_id=uuid4(),
                     original_geometry="POLYGON((0 0, 1 0, 1 0.001, 0 0.001, 0 0))",
                 )
             ],
         )
         bus.uow.grid_repo.add(grid)
 
-        results = bus.handle(
-            ValidatePolygon(grid_id=grid_id, polygon_id=polygon_id)
-        )
+        results = bus.handle(ValidatePolygon(grid_id=grid_id, polygon_id=polygon_id))
 
         assert results[0]["status"] == "low_confidence"
         assert results[0]["confidence"] < 0.70
@@ -84,23 +90,20 @@ class TestValidatePolygon:
     def test_grid_not_found_raises(self) -> None:
         bus = bootstrap()
         with pytest.raises(ValueError):
-            bus.handle(
-                ValidatePolygon(grid_id=uuid4(), polygon_id=uuid4())
-            )
+            bus.handle(ValidatePolygon(grid_id=uuid4(), polygon_id=uuid4()))
 
     def test_polygon_not_in_grid(self) -> None:
         bus = bootstrap()
         grid_id = uuid4()
         grid = TaskGrid(
-            id=grid_id, initiative_id=uuid4(),
+            id=grid_id,
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         bus.uow.grid_repo.add(grid)
 
         with pytest.raises(ValueError):
-            bus.handle(
-                ValidatePolygon(grid_id=grid_id, polygon_id=uuid4())
-            )
+            bus.handle(ValidatePolygon(grid_id=grid_id, polygon_id=uuid4()))
 
 
 class TestUploadPolygonSet:
@@ -127,7 +130,8 @@ class TestUploadPolygonSet:
         with pytest.raises(ValueError):
             bus.handle(
                 UploadPolygonSet(
-                    user_id=uuid4(), name="Test Set",
+                    user_id=uuid4(),
+                    name="Test Set",
                     geometries=["POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"],
                 )
             )
@@ -139,11 +143,14 @@ class TestCorrectBoundary:
         polygon_id = uuid4()
         grid_id = uuid4()
         grid = TaskGrid(
-            id=grid_id, initiative_id=uuid4(),
+            id=grid_id,
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
             polygons=[
                 Polygon(
-                    id=polygon_id, task_grid_id=grid_id, polygon_set_id=uuid4(),
+                    id=polygon_id,
+                    task_grid_id=grid_id,
+                    polygon_set_id=uuid4(),
                     original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
                 )
             ],
@@ -173,11 +180,14 @@ class TestConsensusTrigger:
         user_a = uuid4()
         user_b = uuid4()
         grid = TaskGrid(
-            id=grid_id, initiative_id=uuid4(),
+            id=grid_id,
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
             polygons=[
                 Polygon(
-                    id=polygon_id, task_grid_id=grid_id, polygon_set_id=uuid4(),
+                    id=polygon_id,
+                    task_grid_id=grid_id,
+                    polygon_set_id=uuid4(),
                     original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
                 )
             ],
@@ -186,14 +196,16 @@ class TestConsensusTrigger:
 
         bus.handle(
             CorrectBoundary(
-                grid_id=grid_id, polygon_id=polygon_id,
+                grid_id=grid_id,
+                polygon_id=polygon_id,
                 user_id=user_a,
                 new_geometry="POLYGON((0 0, 2 0, 2 1, 0 1, 0 0))",
             )
         )
         bus.handle(
             CorrectBoundary(
-                grid_id=grid_id, polygon_id=polygon_id,
+                grid_id=grid_id,
+                polygon_id=polygon_id,
                 user_id=user_b,
                 new_geometry="POLYGON((0 0, 2 0, 2 1, 0 1, 0 0))",
             )
@@ -208,11 +220,14 @@ class TestConsensusTrigger:
         polygon_id = uuid4()
         grid_id = uuid4()
         grid = TaskGrid(
-            id=grid_id, initiative_id=uuid4(),
+            id=grid_id,
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
             polygons=[
                 Polygon(
-                    id=polygon_id, task_grid_id=grid_id, polygon_set_id=uuid4(),
+                    id=polygon_id,
+                    task_grid_id=grid_id,
+                    polygon_set_id=uuid4(),
                     original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
                 )
             ],
@@ -221,7 +236,8 @@ class TestConsensusTrigger:
 
         bus.handle(
             CorrectBoundary(
-                grid_id=grid_id, polygon_id=polygon_id,
+                grid_id=grid_id,
+                polygon_id=polygon_id,
                 user_id=uuid4(),
                 new_geometry="POLYGON((0 0, 2 0, 2 1, 0 1, 0 0))",
             )
@@ -259,7 +275,8 @@ class TestLockGridBlock:
         grid_id = uuid4()
         user_id = uuid4()
         grid = TaskGrid(
-            id=grid_id, initiative_id=uuid4(),
+            id=grid_id,
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         bus.uow.grid_repo.add(grid)
@@ -278,11 +295,14 @@ class TestEventDispatching:
         polygon_id = uuid4()
         grid_id = uuid4()
         grid = TaskGrid(
-            id=grid_id, initiative_id=uuid4(),
+            id=grid_id,
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
             polygons=[
                 Polygon(
-                    id=polygon_id, task_grid_id=grid_id, polygon_set_id=uuid4(),
+                    id=polygon_id,
+                    task_grid_id=grid_id,
+                    polygon_set_id=uuid4(),
                     original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
                 )
             ],
@@ -306,11 +326,14 @@ class TestEventDispatching:
         grid_id = uuid4()
         user_id = uuid4()
         grid = TaskGrid(
-            id=grid_id, initiative_id=uuid4(),
+            id=grid_id,
+            initiative_id=uuid4(),
             geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
             polygons=[
                 Polygon(
-                    id=polygon_id, task_grid_id=grid_id, polygon_set_id=uuid4(),
+                    id=polygon_id,
+                    task_grid_id=grid_id,
+                    polygon_set_id=uuid4(),
                     original_geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
                 )
             ],
@@ -335,7 +358,9 @@ class TestEventDispatching:
 class TestTopUpCredits:
     def test_top_up_increases_credits(self) -> None:
         bus = bootstrap()
-        user = User(id=uuid4(), email="test@test.com", name="Test", role="annotator", credits_remaining=50)
+        user = User(
+            id=uuid4(), email="test@test.com", name="Test", role="annotator", credits_remaining=50
+        )
         bus.uow.user_repo.add(user)
 
         results = bus.handle(TopUpCredits(user_id=user.id, amount=100))
@@ -355,7 +380,12 @@ class TestRequestExport:
         bus.uow.user_repo.add(user)
 
         results = bus.handle(
-            RequestExport(user_id=user.id, export_format="geojson", source_type="initiative", source_id=uuid4())
+            RequestExport(
+                user_id=user.id,
+                export_format="geojson",
+                source_type="initiative",
+                source_id=uuid4(),
+            )
         )
 
         assert results[0]["status"] == "pending"
@@ -368,14 +398,24 @@ class TestRequestExport:
 
         with pytest.raises(ValueError, match="Unsupported format"):
             bus.handle(
-                RequestExport(user_id=user.id, export_format="pdf", source_type="initiative", source_id=uuid4())
+                RequestExport(
+                    user_id=user.id,
+                    export_format="pdf",
+                    source_type="initiative",
+                    source_id=uuid4(),
+                )
             )
 
     def test_export_user_not_found(self) -> None:
         bus = bootstrap()
         with pytest.raises(ValueError, match="not found"):
             bus.handle(
-                RequestExport(user_id=uuid4(), export_format="geojson", source_type="initiative", source_id=uuid4())
+                RequestExport(
+                    user_id=uuid4(),
+                    export_format="geojson",
+                    source_type="initiative",
+                    source_id=uuid4(),
+                )
             )
 
 
@@ -383,7 +423,10 @@ class TestGenerateGridBlocks:
     def test_generates_grids_for_initiative(self) -> None:
         bus = bootstrap()
         initiative = Initiative(
-            id=uuid4(), owner_id=uuid4(), name="Test", region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            id=uuid4(),
+            owner_id=uuid4(),
+            name="Test",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         bus.uow.initiative_repo.add(initiative)
 
@@ -401,11 +444,18 @@ class TestGenerateGridBlocks:
     def test_duplicate_grid_generation_raises(self) -> None:
         bus = bootstrap()
         initiative = Initiative(
-            id=uuid4(), owner_id=uuid4(), name="Test", region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            id=uuid4(),
+            owner_id=uuid4(),
+            name="Test",
+            region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         )
         bus.uow.initiative_repo.add(initiative)
         bus.uow.grid_repo.add(
-            TaskGrid(id=uuid4(), initiative_id=initiative.id, geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")
+            TaskGrid(
+                id=uuid4(),
+                initiative_id=initiative.id,
+                geometry="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            )
         )
 
         with pytest.raises(ValueError, match="already exist"):
@@ -415,12 +465,16 @@ class TestGenerateGridBlocks:
 class TestAssignParticipant:
     def test_assigns_user_to_initiative(self) -> None:
         bus = bootstrap()
-        initiative = Initiative(id=uuid4(), owner_id=uuid4(), name="Test", region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")
+        initiative = Initiative(
+            id=uuid4(), owner_id=uuid4(), name="Test", region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"
+        )
         user = User(id=uuid4(), email="test@test.com", name="Test", role="annotator")
         bus.uow.initiative_repo.add(initiative)
         bus.uow.user_repo.add(user)
 
-        results = bus.handle(AssignParticipant(initiative_id=initiative.id, user_id=user.id, role="annotator"))
+        results = bus.handle(
+            AssignParticipant(initiative_id=initiative.id, user_id=user.id, role="annotator")
+        )
 
         assert results[0]["role"] == "annotator"
         participants = bus.uow.participant_repo.list_by_initiative(initiative.id)
@@ -433,7 +487,9 @@ class TestAssignParticipant:
 
     def test_assign_user_not_found(self) -> None:
         bus = bootstrap()
-        initiative = Initiative(id=uuid4(), owner_id=uuid4(), name="Test", region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")
+        initiative = Initiative(
+            id=uuid4(), owner_id=uuid4(), name="Test", region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"
+        )
         bus.uow.initiative_repo.add(initiative)
         with pytest.raises(ValueError):
             bus.handle(AssignParticipant(initiative_id=initiative.id, user_id=uuid4()))
@@ -446,7 +502,9 @@ class TestListDatasetForSale:
         bus.uow.user_repo.add(user)
 
         results = bus.handle(
-            ListDatasetForSale(seller_id=user.id, dataset_id=uuid4(), title="Test Dataset", price_tokens=50.0)
+            ListDatasetForSale(
+                seller_id=user.id, dataset_id=uuid4(), title="Test Dataset", price_tokens=50.0
+            )
         )
 
         assert results[0]["title"] == "Test Dataset"
@@ -456,7 +514,9 @@ class TestListDatasetForSale:
         bus = bootstrap()
         with pytest.raises(ValueError):
             bus.handle(
-                ListDatasetForSale(seller_id=uuid4(), dataset_id=uuid4(), title="Test", price_tokens=10.0)
+                ListDatasetForSale(
+                    seller_id=uuid4(), dataset_id=uuid4(), title="Test", price_tokens=10.0
+                )
             )
 
 
@@ -464,13 +524,22 @@ class TestPurchaseDataset:
     def test_purchase_deducts_credits(self) -> None:
         bus = bootstrap()
         seller = User(id=uuid4(), email="seller@test.com", name="Seller", role="annotator")
-        buyer = User(id=uuid4(), email="buyer@test.com", name="Buyer", role="annotator", credits_remaining=200)
+        buyer = User(
+            id=uuid4(),
+            email="buyer@test.com",
+            name="Buyer",
+            role="annotator",
+            credits_remaining=200,
+        )
         bus.uow.user_repo.add(seller)
         bus.uow.user_repo.add(buyer)
 
         listing = MarketplaceListing(
-            listing_id=uuid4(), seller_id=seller.id, dataset_id=uuid4(),
-            title="Test Dataset", price_tokens=50.0,
+            listing_id=uuid4(),
+            seller_id=seller.id,
+            dataset_id=uuid4(),
+            title="Test Dataset",
+            price_tokens=50.0,
         )
         bus.uow.marketplace_repo.add_listing(listing)
 
@@ -487,13 +556,23 @@ class TestPurchaseDataset:
     def test_purchase_sold_listing_raises(self) -> None:
         bus = bootstrap()
         seller = User(id=uuid4(), email="seller@test.com", name="Seller", role="annotator")
-        buyer = User(id=uuid4(), email="buyer@test.com", name="Buyer", role="annotator", credits_remaining=200)
+        buyer = User(
+            id=uuid4(),
+            email="buyer@test.com",
+            name="Buyer",
+            role="annotator",
+            credits_remaining=200,
+        )
         bus.uow.user_repo.add(seller)
         bus.uow.user_repo.add(buyer)
 
         listing = MarketplaceListing(
-            listing_id=uuid4(), seller_id=seller.id, dataset_id=uuid4(),
-            title="Sold Dataset", price_tokens=50.0, status="sold",
+            listing_id=uuid4(),
+            seller_id=seller.id,
+            dataset_id=uuid4(),
+            title="Sold Dataset",
+            price_tokens=50.0,
+            status="sold",
         )
         bus.uow.marketplace_repo.add_listing(listing)
 
@@ -503,13 +582,18 @@ class TestPurchaseDataset:
     def test_purchase_insufficient_credits(self) -> None:
         bus = bootstrap()
         seller = User(id=uuid4(), email="seller@test.com", name="Seller", role="annotator")
-        buyer = User(id=uuid4(), email="buyer@test.com", name="Buyer", role="annotator", credits_remaining=10)
+        buyer = User(
+            id=uuid4(), email="buyer@test.com", name="Buyer", role="annotator", credits_remaining=10
+        )
         bus.uow.user_repo.add(seller)
         bus.uow.user_repo.add(buyer)
 
         listing = MarketplaceListing(
-            listing_id=uuid4(), seller_id=seller.id, dataset_id=uuid4(),
-            title="Expensive Dataset", price_tokens=50.0,
+            listing_id=uuid4(),
+            seller_id=seller.id,
+            dataset_id=uuid4(),
+            title="Expensive Dataset",
+            price_tokens=50.0,
         )
         bus.uow.marketplace_repo.add_listing(listing)
 
@@ -523,13 +607,16 @@ class TestJoinHackathon:
         initiative_id = uuid4()
         user_id = uuid4()
         initiative = Initiative(
-            id=initiative_id, owner_id=user_id, name="Hackathon",
+            id=initiative_id,
+            owner_id=user_id,
+            name="Hackathon",
             region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
-            status=InitiativeStatus.ACTIVE, hackathon_mode=True,
+            status=InitiativeStatus.ACTIVE,
+            hackathon_mode=True,
         )
         bus.uow.initiative_repo.add(initiative)
 
-        results = bus.handle(JoinHackathon(initiative_id=initiative_id, user_id=user_id))
+        bus.handle(JoinHackathon(initiative_id=initiative_id, user_id=user_id))
         entry = bus.uow.leaderboard_repo.get_by_user_and_initiative(initiative_id, user_id)
         assert entry is not None
         assert entry.score == 0.0
@@ -537,9 +624,12 @@ class TestJoinHackathon:
     def test_join_non_hackathon_raises(self) -> None:
         bus = bootstrap()
         initiative = Initiative(
-            id=uuid4(), owner_id=uuid4(), name="Normal",
+            id=uuid4(),
+            owner_id=uuid4(),
+            name="Normal",
             region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
-            status=InitiativeStatus.ACTIVE, hackathon_mode=False,
+            status=InitiativeStatus.ACTIVE,
+            hackathon_mode=False,
         )
         bus.uow.initiative_repo.add(initiative)
         with pytest.raises(ValueError, match="not a hackathon"):
@@ -550,9 +640,12 @@ class TestJoinHackathon:
         initiative_id = uuid4()
         user_id = uuid4()
         initiative = Initiative(
-            id=initiative_id, owner_id=uuid4(), name="Hackathon",
+            id=initiative_id,
+            owner_id=uuid4(),
+            name="Hackathon",
             region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
-            status=InitiativeStatus.ACTIVE, hackathon_mode=True,
+            status=InitiativeStatus.ACTIVE,
+            hackathon_mode=True,
         )
         bus.uow.initiative_repo.add(initiative)
         bus.handle(JoinHackathon(initiative_id=initiative_id, user_id=user_id))
@@ -566,13 +659,20 @@ class TestSubmitHackathonResult:
         initiative_id = uuid4()
         user_id = uuid4()
         initiative = Initiative(
-            id=initiative_id, owner_id=user_id, name="Hackathon",
+            id=initiative_id,
+            owner_id=user_id,
+            name="Hackathon",
             region="POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
-            status=InitiativeStatus.ACTIVE, hackathon_mode=True,
+            status=InitiativeStatus.ACTIVE,
+            hackathon_mode=True,
         )
         bus.uow.initiative_repo.add(initiative)
         bus.handle(JoinHackathon(initiative_id=initiative_id, user_id=user_id))
-        bus.handle(SubmitHackathonResult(initiative_id=initiative_id, user_id=user_id, score=95.0, accuracy_pct=0.95))
+        bus.handle(
+            SubmitHackathonResult(
+                initiative_id=initiative_id, user_id=user_id, score=95.0, accuracy_pct=0.95
+            )
+        )
         entry = bus.uow.leaderboard_repo.get_by_user_and_initiative(initiative_id, user_id)
         assert entry is not None
         assert entry.score == 95.0
@@ -581,4 +681,8 @@ class TestSubmitHackathonResult:
     def test_submit_without_join_raises(self) -> None:
         bus = bootstrap()
         with pytest.raises(ValueError, match="not joined"):
-            bus.handle(SubmitHackathonResult(initiative_id=uuid4(), user_id=uuid4(), score=50.0, accuracy_pct=0.5))
+            bus.handle(
+                SubmitHackathonResult(
+                    initiative_id=uuid4(), user_id=uuid4(), score=50.0, accuracy_pct=0.5
+                )
+            )

@@ -24,19 +24,27 @@ echo "5. Applying database migrations..."
 make docker-migrate
 
 echo ""
-echo "6. Running linter..."
-make lint || true
+echo "6. Auto-fixing ruff issues..."
+ruff check --fix && ruff format
 
 echo ""
-echo "7. Running typechecker..."
+echo "7. Running linter (should be clean)..."
+make lint
+
+echo ""
+echo "8. Installing mypy type stubs..."
+python -m pip install types-PyYAML types-psycopg2
+
+echo ""
+echo "9. Running typechecker (known ~260 errors — pre-existing, not regressions)..."
 make typecheck || true
 
 echo ""
-echo "8. Running unit tests..."
+echo "10. Running unit tests (7 pre-existing failures — see docs)..."
 python -m pytest tests/unit/ -v || true
 
 echo ""
-echo "9. Running smoke test..."
+echo "11. Running smoke test..."
 bash scripts/smoke-test.sh || true
 
 echo ""

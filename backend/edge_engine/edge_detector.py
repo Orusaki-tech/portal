@@ -4,10 +4,8 @@ K-means clustering, and active contour models.
 """
 
 import numpy as np
-from skimage import exposure, filters, morphology, measure, segmentation, color
+from skimage import color, exposure
 from sklearn.cluster import KMeans
-from shapely.geometry import shape, Polygon, LineString
-from shapely import affinity
 
 
 def enhance_contrast(pixel_matrix: np.ndarray) -> np.ndarray:
@@ -23,16 +21,17 @@ def cluster_pixels(buffer_pixels: np.ndarray, n_clusters: int = 3) -> np.ndarray
     """
     h, w = buffer_pixels.shape[:2]
     pixels_flat = buffer_pixels.reshape(-1, buffer_pixels.shape[-1])
-    
+
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
     labels = kmeans.fit_predict(pixels_flat)
-    
+
     return labels.reshape(h, w)
 
 
 def compute_edge_gradient(clustered: np.ndarray) -> np.ndarray:
     """Compute gradient magnitude from clustered pixel labels."""
     from skimage import filters as sk_filters
+
     gradient = sk_filters.sobel(clustered.astype(float))
     return gradient
 
@@ -49,7 +48,7 @@ def active_contour_snake(
     The initial contour seeds from the ML-predicted boundary.
     """
     from skimage.segmentation import active_contour
-    
+
     snake = active_contour(
         image if image.ndim == 2 else color.rgb2gray(image),
         initial_contour,
@@ -69,7 +68,7 @@ def measure_deviation(
     and snake-fitted boundary. Returns mean deviation and array of distances.
     """
     from scipy.spatial import cKDTree
-    
+
     tree = cKDTree(snake_vertices)
     distances, _ = tree.query(predicted_vertices)
     return float(np.mean(distances)), distances
@@ -86,24 +85,24 @@ def compute_spectral_contrast(
     h, w = buffer_pixels.shape[:2]
     pixels_flat = buffer_pixels.reshape(-1, buffer_pixels.shape[-1]).astype(float)
     labels_flat = labels.flatten()
-    
+
     unique_labels = np.unique(labels_flat)
     if len(unique_labels) < 2:
         return 0.0
-    
+
     means = []
     for label in unique_labels:
         mask = labels_flat == label
         means.append(np.mean(pixels_flat[mask], axis=0))
-    
+
     if len(means) < 2:
         return 0.0
-    
+
     max_dist = 0.0
     for i in range(len(means)):
         for j in range(i + 1, len(means)):
             dist = np.linalg.norm(means[i] - means[j])
             max_dist = max(max_dist, dist)
-    
+
     max_possible = np.linalg.norm(np.full(buffer_pixels.shape[-1], 255))
     return float(min(max_dist / max_possible, 1.0))

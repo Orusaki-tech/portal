@@ -19,6 +19,7 @@ POLL_INTERVAL_SECONDS = 5
 try:
     import pyarrow as pa
     import pyarrow.parquet as pq
+
     HAS_PARQUET = True
 except ImportError:
     HAS_PARQUET = False
@@ -26,34 +27,38 @@ except ImportError:
 try:
     import fiona
     from fiona.crs import from_epsg
+
     HAS_GEOPACKAGE = True
 except ImportError:
     HAS_GEOPACKAGE = False
 
 try:
     import tensorflow as tf
+
     HAS_TFRECORD = True
 except ImportError:
     HAS_TFRECORD = False
 
 
-def _convert_to_geojson(cur: object, source_type: str, source_id: UUID, export_params: dict | None = None) -> str:
+def _convert_to_geojson(
+    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+) -> str:
     if source_type == "grid":
         cur.execute(
-            "SELECT p.id, p.polygon_set_id, p.original_geometry, p.corrected_geometry, p.confidence_avg "
+            "SELECT p.id, p.polygon_set_id, p.original_geometry, p.corrected_geometry, p.confidence_avg "  # noqa: E501
             "FROM polygons p JOIN task_grids g ON p.task_grid_id = g.id WHERE g.id = %s",
             (source_id,),
         )
     elif source_type == "initiative":
         cur.execute(
-            "SELECT p.id, p.polygon_set_id, p.original_geometry, p.corrected_geometry, p.confidence_avg "
+            "SELECT p.id, p.polygon_set_id, p.original_geometry, p.corrected_geometry, p.confidence_avg "  # noqa: E501
             "FROM polygons p JOIN task_grids g ON p.task_grid_id = g.id "
             "JOIN initiatives i ON g.initiative_id = i.id WHERE i.id = %s",
             (source_id,),
         )
     else:
         cur.execute(
-            "SELECT p.id, p.polygon_set_id, p.original_geometry, p.corrected_geometry, p.confidence_avg "
+            "SELECT p.id, p.polygon_set_id, p.original_geometry, p.corrected_geometry, p.confidence_avg "  # noqa: E501
             "FROM polygons p WHERE p.polygon_set_id = %s",
             (source_id,),
         )
@@ -75,9 +80,13 @@ def _convert_to_geojson(cur: object, source_type: str, source_id: UUID, export_p
             if not export_params.get("include_original", True) and row[3] is None:
                 continue
             conf = feat["properties"].get("confidence_avg")
-            if export_params.get("confidence_min") is not None and (conf is None or conf < export_params["confidence_min"]):
+            if export_params.get("confidence_min") is not None and (
+                conf is None or conf < export_params["confidence_min"]
+            ):
                 continue
-            if export_params.get("confidence_max") is not None and (conf is not None and conf > export_params["confidence_max"]):
+            if export_params.get("confidence_max") is not None and (
+                conf is not None and conf > export_params["confidence_max"]
+            ):
                 continue
         features.append(feat)
 
@@ -86,11 +95,14 @@ def _convert_to_geojson(cur: object, source_type: str, source_id: UUID, export_p
 
 def _wkt_to_geojson_coords(wkt_str: str) -> list[list[float]]:
     from shapely import wkt as shapely_wkt
+
     geom = shapely_wkt.loads(wkt_str)
     return list(geom.exterior.coords)
 
 
-def _convert_to_coco(cur: object, source_type: str, source_id: UUID, export_params: dict | None = None) -> str:
+def _convert_to_coco(
+    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     images: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = []
@@ -116,24 +128,33 @@ def _convert_to_coco(cur: object, source_type: str, source_id: UUID, export_para
         min_y, max_y = min(ys), max(ys)
         bbox_w = max_x - min_x
         bbox_h = max_y - min_y
-        annotations.append({
-            "id": ann_id,
-            "image_id": 1,
-            "category_id": 1,
-            "segmentation": [flat],
-            "area": round(bbox_w * bbox_h, 4),
-            "bbox": [round(min_x, 6), round(min_y, 6), round(bbox_w, 6), round(bbox_h, 6)],
-            "iscrowd": 0,
-        })
-    images.append({"id": 1, "file_name": "source", "width": round(img_w, 6), "height": round(img_h, 6)})
-    return json.dumps({
-        "images": images,
-        "annotations": annotations,
-        "categories": [{"id": 1, "name": "polygon", "supercategory": "boundary"}],
-    }, indent=2)
+        annotations.append(
+            {
+                "id": ann_id,
+                "image_id": 1,
+                "category_id": 1,
+                "segmentation": [flat],
+                "area": round(bbox_w * bbox_h, 4),
+                "bbox": [round(min_x, 6), round(min_y, 6), round(bbox_w, 6), round(bbox_h, 6)],
+                "iscrowd": 0,
+            }
+        )
+    images.append(
+        {"id": 1, "file_name": "source", "width": round(img_w, 6), "height": round(img_h, 6)}
+    )
+    return json.dumps(
+        {
+            "images": images,
+            "annotations": annotations,
+            "categories": [{"id": 1, "name": "polygon", "supercategory": "boundary"}],
+        },
+        indent=2,
+    )
 
 
-def _convert_to_yolo(cur: object, source_type: str, source_id: UUID, export_params: dict | None = None) -> str:
+def _convert_to_yolo(
+    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     all_coords = []
     for feat in geojson["features"]:
@@ -162,28 +183,34 @@ def _convert_to_yolo(cur: object, source_type: str, source_id: UUID, export_para
     return "\n".join(lines)
 
 
-def _convert_to_pascal_voc(cur: object, source_type: str, source_id: UUID, export_params: dict | None = None) -> str:
+def _convert_to_pascal_voc(
+    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
-    parts: list[str] = ['<annotation>']
+    parts: list[str] = ["<annotation>"]
     for feat in geojson["features"]:
-        parts.append(f'  <object><name>polygon</name><polygon>')
+        parts.append("  <object><name>polygon</name><polygon>")
         for pt in feat["geometry"]["coordinates"][0]:
-            parts.append(f'    <pt><x>{pt[0]}</x><y>{pt[1]}</y></pt>')
-        parts.append(f'  </polygon></object>')
-    parts.append('</annotation>')
+            parts.append(f"    <pt><x>{pt[0]}</x><y>{pt[1]}</y></pt>")
+        parts.append("  </polygon></object>")
+    parts.append("</annotation>")
     return "\n".join(parts)
 
 
-def _convert_to_parquet(cur: object, source_type: str, source_id: UUID, export_params: dict | None = None) -> str:
+def _convert_to_parquet(
+    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     rows: list[dict[str, Any]] = []
     for feat in geojson["features"]:
-        rows.append({
-            "polygon_id": feat.get("id", ""),
-            "polygon_set_id": feat.get("properties", {}).get("polygon_set_id"),
-            "confidence_avg": feat.get("properties", {}).get("confidence_avg"),
-            "wkt": f"POLYGON(({','.join(f'{c[0]} {c[1]}' for c in feat['geometry']['coordinates'][0])}))",
-        })
+        rows.append(
+            {
+                "polygon_id": feat.get("id", ""),
+                "polygon_set_id": feat.get("properties", {}).get("polygon_set_id"),
+                "confidence_avg": feat.get("properties", {}).get("confidence_avg"),
+                "wkt": f"POLYGON(({','.join(f'{c[0]} {c[1]}' for c in feat['geometry']['coordinates'][0])}))",  # noqa: E501
+            }
+        )
     if HAS_PARQUET:
         table = pa.Table.from_pylist(rows)
         buf = pa.BufferOutputStream()
@@ -192,30 +219,40 @@ def _convert_to_parquet(cur: object, source_type: str, source_id: UUID, export_p
     return json.dumps(rows, indent=2)
 
 
-def _convert_to_geopackage(cur: object, source_type: str, source_id: UUID, export_params: dict | None = None) -> str:
+def _convert_to_geopackage(
+    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     features = geojson.get("features", [])
     if HAS_GEOPACKAGE:
         buf = io.BytesIO()
         schema = {
             "geometry": "Polygon",
-            "properties": [("polygon_id", "str"), ("polygon_set_id", "str"), ("confidence_avg", "float")],
+            "properties": [
+                ("polygon_id", "str"),
+                ("polygon_set_id", "str"),
+                ("confidence_avg", "float"),
+            ],
         }
         with fiona.open(buf, "w", driver="GPKG", schema=schema, crs=from_epsg(4326)) as dst:
             for feat in features:
-                dst.write({
-                    "geometry": feat["geometry"],
-                    "properties": {
-                        "polygon_id": feat.get("id", ""),
-                        "polygon_set_id": feat.get("properties", {}).get("polygon_set_id", ""),
-                        "confidence_avg": feat.get("properties", {}).get("confidence_avg", 0.0),
-                    },
-                })
+                dst.write(
+                    {
+                        "geometry": feat["geometry"],
+                        "properties": {
+                            "polygon_id": feat.get("id", ""),
+                            "polygon_set_id": feat.get("properties", {}).get("polygon_set_id", ""),
+                            "confidence_avg": feat.get("properties", {}).get("confidence_avg", 0.0),
+                        },
+                    }
+                )
         return base64.b64encode(buf.getvalue()).decode()
     return json.dumps(features, indent=2)
 
 
-def _convert_to_tfrecord(cur: object, source_type: str, source_id: UUID, export_params: dict | None = None) -> str:
+def _convert_to_tfrecord(
+    cur: object, source_type: str, source_id: UUID, export_params: dict | None = None
+) -> str:
     geojson = json.loads(_convert_to_geojson(cur, source_type, source_id, export_params))
     if not HAS_TFRECORD:
         return json.dumps({"error": "tensorflow not installed"}, indent=2)
@@ -223,21 +260,21 @@ def _convert_to_tfrecord(cur: object, source_type: str, source_id: UUID, export_
     with tf.io.TFRecordWriter(buf) as writer:
         for feat in geojson.get("features", []):
             coords = feat["geometry"]["coordinates"][0]
-            feature = tf.train.Features(feature={
-                "polygon_id": tf.train.Feature(
-                    bytes_list=tf.train.BytesList(value=[str(feat.get("id", "")).encode()])
-                ),
-                "coordinates": tf.train.Feature(
-                    float_list=tf.train.FloatList(
-                        value=[c for pt in coords for c in pt]
-                    )
-                ),
-                "confidence_avg": tf.train.Feature(
-                    float_list=tf.train.FloatList(
-                        value=[feat.get("properties", {}).get("confidence_avg", 0.0)]
-                    )
-                ),
-            })
+            feature = tf.train.Features(
+                feature={
+                    "polygon_id": tf.train.Feature(
+                        bytes_list=tf.train.BytesList(value=[str(feat.get("id", "")).encode()])
+                    ),
+                    "coordinates": tf.train.Feature(
+                        float_list=tf.train.FloatList(value=[c for pt in coords for c in pt])
+                    ),
+                    "confidence_avg": tf.train.Feature(
+                        float_list=tf.train.FloatList(
+                            value=[feat.get("properties", {}).get("confidence_avg", 0.0)]
+                        )
+                    ),
+                }
+            )
             writer.write(tf.train.Example(features=feature).SerializeToString())
     return base64.b64encode(buf.getvalue()).decode()
 
@@ -298,7 +335,7 @@ class ExportWorker:
             repo = PostgresExportRepository(conn)
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT export_id, user_id, export_format, source_type, source_id, export_params "
+                    "SELECT export_id, user_id, export_format, source_type, source_id, export_params "  # noqa: E501
                     "FROM export_jobs WHERE status = 'pending' ORDER BY created_at ASC"
                 )
                 for row in cur.fetchall():
@@ -332,23 +369,24 @@ class ExportWorker:
                 content = converter(cur, job.source_type, job.source_id, job.export_params or {})
                 content_bytes = content.encode("utf-8")
                 output_url = (
-                    f"https://storage.realitysync.app/exports/"
-                    f"{job.export_id}/{job.export_id}.{ext}"
+                    f"https://storage.realitysync.app/exports/{job.export_id}/{job.export_id}.{ext}"
                 )
                 logger.info(
-                    "Export %s converted: %s (%d bytes)", job.export_id, job.export_format, len(content_bytes)
+                    "Export %s converted: %s (%d bytes)",
+                    job.export_id,
+                    job.export_format,
+                    len(content_bytes),
                 )
             except Exception:
                 logger.exception("Export %s conversion failed", job.export_id)
                 cur.execute(
-                    "UPDATE export_jobs SET status = 'failed', completed_at = now() WHERE export_id = %s",
+                    "UPDATE export_jobs SET status = 'failed', completed_at = now() WHERE export_id = %s",  # noqa: E501
                     (job.export_id,),
                 )
                 return
         else:
             output_url = (
-                f"https://storage.realitysync.app/exports/"
-                f"{job.export_id}/{job.export_id}.{ext}"
+                f"https://storage.realitysync.app/exports/{job.export_id}/{job.export_id}.{ext}"
             )
 
         cur.execute(
@@ -362,5 +400,7 @@ class ExportWorker:
 
         logger.info(
             "Export %s completed: %s -> %s",
-            job.export_id, job.export_format, output_url,
+            job.export_id,
+            job.export_format,
+            output_url,
         )

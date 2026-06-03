@@ -68,9 +68,10 @@ async def serve_user_imagery_tile(imagery_id: str, z: int, x: int, y: int) -> Re
         if not local_path.exists():
             raise HTTPException(status_code=404, detail="Local file not found")
         try:
-            from rio_tiler.io import Reader
             from io import BytesIO
+
             import numpy as np
+            from rio_tiler.io import Reader
 
             with Reader(str(local_path)) as reader:
                 tile_data = reader.tile(x, y, z, tilesize=256)
