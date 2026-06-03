@@ -12,6 +12,8 @@ API_BASE="${API_BASE:-http://localhost:8000/api}"
 EMAIL="${EMAIL:-smoke@realitysync.example}"
 PASSWORD="${PASSWORD:-SmokeTest123!}"
 COOKIE_JAR=$(mktemp)
+SET_ID=""
+TOKEN=""
 PASS=0
 FAIL=0
 
@@ -34,11 +36,19 @@ else
     fail "health endpoint" "$HEALTH"
 fi
 
-# 2. Register
+# 2. Register (retry up to 5 times, waiting for DB)
 echo "2. Register"
-REG=$(curl -sf -X POST "${API_BASE}/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\",\"name\":\"Smoke Tester\"}" 2>&1 || true)
+REG=""
+for i in $(seq 1 5); do
+    REG=$(curl -sf -X POST "${API_BASE}/auth/register" \
+        -H "Content-Type: application/json" \
+        -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\",\"name\":\"Smoke Tester\"}" 2>&1 || true)
+    if echo "$REG" | grep -q "user_id"; then
+        break
+    fi
+    echo "  (retry $i/5)"
+    sleep 2
+done
 if echo "$REG" | grep -q "user_id"; then
     pass "register"
 else
@@ -75,16 +85,20 @@ else
     fail "upload dataset" "$UPLOAD"
 fi
 
-# 5. Validate polygon
-echo "5. Validate polygon"
-VALIDATE=$(curl -sf -X POST "${API_BASE}/validate" \
-    -H "${AUTH}" \
-    -H "Content-Type: application/json" \
-    -d "{\"polygon_set_id\":\"${SET_ID}\"}" 2>&1 || true)
-if echo "$VALIDATE" | grep -q "run_id"; then
-    pass "validate polygon"
+# 5. Validate polygon (skip if no dataset uploaded)
+if [ -n "$SET_ID" ]; then
+    echo "5. Validate polygon"
+    VALIDATE=$(curl -sf -X POST "${API_BASE}/validate" \
+        -H "${AUTH}" \
+        -H "Content-Type: application/json" \
+        -d "{\"polygon_set_id\":\"${SET_ID}\"}" 2>&1 || true)
+    if echo "$VALIDATE" | grep -q "run_id"; then
+        pass "validate polygon"
+    else
+        fail "validate polygon" "$VALIDATE"
+    fi
 else
-    fail "validate polygon" "$VALIDATE"
+    echo "5. Validate polygon (skipped — no dataset)"
 fi
 
 # 6. List triage
@@ -97,16 +111,20 @@ else
     fail "list triage" "$TRIAGE"
 fi
 
-# 7. Request export
-echo "7. Request export"
-EXPORT=$(curl -sf -X POST "${API_BASE}/exports" \
-    -H "${AUTH}" \
-    -H "Content-Type: application/json" \
-    -d "{\"format\":\"geojson\",\"source_type\":\"dataset\",\"source_id\":\"${SET_ID}\"}" 2>&1 || true)
-if echo "$EXPORT" | grep -q "export_id"; then
-    pass "request export"
+# 7. Request export (skip if no dataset uploaded)
+if [ -n "$SET_ID" ]; then
+    echo "7. Request export"
+    EXPORT=$(curl -sf -X POST "${API_BASE}/exports" \
+        -H "${AUTH}" \
+        -H "Content-Type: application/json" \
+        -d "{\"format\":\"geojson\",\"source_type\":\"dataset\",\"source_id\":\"${SET_ID}\"}" 2>&1 || true)
+    if echo "$EXPORT" | grep -q "export_id"; then
+        pass "request export"
+    else
+        fail "request export" "$EXPORT"
+    fi
 else
-    fail "request export" "$EXPORT"
+    echo "7. Request export (skipped — no dataset)"
 fi
 
 echo ""
