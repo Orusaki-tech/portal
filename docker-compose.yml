@@ -1,3 +1,6 @@
+# ── Development ──────────────────────────────────────────────────────
+# For production: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
 services:
   postgis:
     image: postgis/postgis:16-3.4

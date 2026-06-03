@@ -21,6 +21,8 @@ USER app
 EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()"
+    CMD python -c "import httpx; httpx.get('http://localhost:${PORT:-8080}/health').raise_for_status()"
 
-CMD ["sh", "-c", "python database/run_migrations.py && uvicorn backend.engine.entrypoints.api:app --host 0.0.0.0 --port 8080"]
+ENV PORT=8080
+
+CMD ["sh", "-c", "python database/run_migrations.py && uvicorn backend.engine.entrypoints.api:app --host 0.0.0.0 --port ${PORT:-8080}"]

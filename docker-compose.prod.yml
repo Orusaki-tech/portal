@@ -1,0 +1,37 @@
+# Production overrides for docker-compose.yml
+#
+# Usage (local dev with production-like setup):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# GCP Cloud Run: use cloudbuild.yaml and scripts/deploy-gcp.sh instead
+
+services:
+  frontend:
+    build:
+      dockerfile: frontend/Dockerfile
+      args:
+        API_URL: http://api:8080
+        NEXT_PUBLIC_API_URL: ${DOMAIN:-http://localhost:8000}
+    container_name: realitysync-frontend
+    environment:
+      NODE_ENV: production
+      API_URL: http://api:8080
+      NEXT_PUBLIC_API_URL: ${DOMAIN:-http://localhost:8000}
+      NEXT_TELEMETRY_DISABLED: 1
+    ports:
+      - "3000:3000"
+    command: ["node", "server.js"]
+    restart: unless-stopped
+
+  api:
+    environment:
+      APP_ENV: production
+      CORS_ORIGINS: ${DOMAIN:-http://localhost:8000},http://localhost:3000
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    restart: unless-stopped
+
+  titiler:
+    restart: unless-stopped
+
+  postgis:
+    restart: unless-stopped
