@@ -2,7 +2,7 @@
 name = "realitysync"
 version = "0.1.0"
 description = "Geospatial boundary validation and data curation platform"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "rio-tiler~=6.0",
     "rasterio~=1.4",
