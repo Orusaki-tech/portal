@@ -2,7 +2,7 @@
 .gitignore
 .env
 .env.example
-data/
+/data/
 frontend/node_modules
 frontend/.next
 .venv/

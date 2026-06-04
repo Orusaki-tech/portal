@@ -16,9 +16,9 @@
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:?Set PROJECT_ID}"
-REGION="${REGION:-us-central1}"
+REGION="${REGION:-us-east1}"
 ARTIFACT_REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/realitysync"
-CLOUD_SQL_INSTANCE="${PROJECT_ID}:${REGION}:realitysync-postgis"
+CLOUD_SQL_INSTANCE="${PROJECT_ID}:${REGION}:affordable-gadgets-production-pg"
 
 echo "═══ RealitySync GCP Deployment ═══"
 echo " Project:       ${PROJECT_ID}"

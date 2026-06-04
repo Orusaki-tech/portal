@@ -1,23 +1,19 @@
 steps:
   # ── 1. API Backend ────────────────────────────────────────────
-  - id: build-api
+  - id: build-and-push-api
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
     args:
       - -c
       - |
+        docker-credential-gcr configure-docker --registries=us-central1-docker.pkg.dev 2>&1 || true
         docker build -f Dockerfile \
-          -t $_ARTIFACT_REGISTRY/realitysync-api:$SHORT_SHA \
+          -t $_ARTIFACT_REGISTRY/realitysync-api:$BUILD_ID \
           -t $_ARTIFACT_REGISTRY/realitysync-api:latest \
           .
+        docker push $_ARTIFACT_REGISTRY/realitysync-api:latest 2>&1
+        docker push $_ARTIFACT_REGISTRY/realitysync-api:$BUILD_ID 2>&1
     waitFor: ["-"]
-
-  - id: push-api
-    name: gcr.io/cloud-builders/docker
-    args:
-      - push
-      - $_ARTIFACT_REGISTRY/realitysync-api:latest
-    waitFor: ["build-api"]
 
   - id: deploy-api
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -36,27 +32,23 @@ steps:
           --min-instances 0 \
           --max-instances 10 \
           --timeout 5m
-    waitFor: ["push-api"]
+    waitFor: ["build-and-push-api"]
 
   # ── 2. TiTiler ────────────────────────────────────────────────
-  - id: build-titiler
+  - id: build-and-push-titiler
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
     args:
       - -c
       - |
+        docker-credential-gcr configure-docker --registries=us-central1-docker.pkg.dev 2>&1 || true
         docker build -f backend/titiler/Dockerfile \
-          -t $_ARTIFACT_REGISTRY/realitysync-titiler:$SHORT_SHA \
+          -t $_ARTIFACT_REGISTRY/realitysync-titiler:$BUILD_ID \
           -t $_ARTIFACT_REGISTRY/realitysync-titiler:latest \
           .
-    waitFor: ["-"]
-
-  - id: push-titiler
-    name: gcr.io/cloud-builders/docker
-    args:
-      - push
-      - $_ARTIFACT_REGISTRY/realitysync-titiler:latest
-    waitFor: ["build-titiler"]
+        docker push $_ARTIFACT_REGISTRY/realitysync-titiler:latest
+        docker push $_ARTIFACT_REGISTRY/realitysync-titiler:$BUILD_ID
+    waitFor: ["build-and-push-api"]
 
   - id: deploy-titiler
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -72,7 +64,7 @@ steps:
           --min-instances 0 \
           --max-instances 5 \
           --timeout 5m
-    waitFor: ["push-titiler"]
+    waitFor: ["build-and-push-titiler"]
 
   # ── 3. Frontend (Next.js) ─────────────────────────────────────
   - id: get-api-url
@@ -84,31 +76,28 @@ steps:
         API_URL=$(gcloud run services describe realitysync-api \
           --region $_REGION \
           --format='value(status.url)')
-        echo "API_URL=$API_URL" >> /workspace/build.env
-        echo "NEXT_PUBLIC_API_URL=$API_URL" >> /workspace/build.env
+        echo "API_URL=$$API_URL" >> /workspace/build.env
+        echo "NEXT_PUBLIC_API_URL=$$API_URL" >> /workspace/build.env
     waitFor: ["deploy-api"]
 
-  - id: build-frontend
+  - id: build-and-push-frontend
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
     args:
       - -c
       - |
-        source /workspace/build.env
+        docker-credential-gcr configure-docker --registries=us-central1-docker.pkg.dev 2>&1 || true
+        API_URL=$$(grep ^API_URL= /workspace/build.env | cut -d= -f2-)
+        NEXT_PUBLIC_API_URL=$$(grep ^NEXT_PUBLIC_API_URL= /workspace/build.env | cut -d= -f2-)
         docker build -f frontend/Dockerfile \
-          --build-arg API_URL=${API_URL} \
-          --build-arg NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
-          -t $_ARTIFACT_REGISTRY/realitysync-frontend:$SHORT_SHA \
+          --build-arg "API_URL=$$API_URL" \
+          --build-arg "NEXT_PUBLIC_API_URL=$$NEXT_PUBLIC_API_URL" \
+          -t $_ARTIFACT_REGISTRY/realitysync-frontend:$BUILD_ID \
           -t $_ARTIFACT_REGISTRY/realitysync-frontend:latest \
           frontend/
+        docker push $_ARTIFACT_REGISTRY/realitysync-frontend:latest
+        docker push $_ARTIFACT_REGISTRY/realitysync-frontend:$BUILD_ID
     waitFor: ["get-api-url"]
-
-  - id: push-frontend
-    name: gcr.io/cloud-builders/docker
-    args:
-      - push
-      - $_ARTIFACT_REGISTRY/realitysync-frontend:latest
-    waitFor: ["build-frontend"]
 
   - id: deploy-frontend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -124,12 +113,12 @@ steps:
           --min-instances 0 \
           --max-instances 10 \
           --timeout 5m
-    waitFor: ["push-frontend"]
+    waitFor: ["build-and-push-frontend"]
 
 substitutions:
   _REGION: us-central1
   _ARTIFACT_REGISTRY: us-central1-docker.pkg.dev/${PROJECT_ID}/realitysync
-  _CLOUD_SQL_INSTANCE: ${PROJECT_ID}:us-central1:realitysync-postgis
+  _CLOUD_SQL_INSTANCE: ${PROJECT_ID}:us-east1:affordable-gadgets-production-pg
 
 artifacts:
   objects:

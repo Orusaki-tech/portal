@@ -38,6 +38,10 @@ const nextConfig: NextConfig = {
         source: "/upload/:path*",
         destination: `${API_URL}/upload/:path*`,
       },
+      {
+        source: "/cog/:path*",
+        destination: "https://realitysync-titiler-111963419931.us-east1.run.app/cog/:path*",
+      },
     ]
   },
 }

@@ -119,7 +119,7 @@ export const IMAGERY_SOURCES: ImagerySource[] = [
   {
     id: "naip",
     label: "NAIP (60cm, US)",
-    tileUrl: "http://localhost:8000/tiles/naip/{z}/{x}/{y}.png",
+    tileUrl: "/tiles/naip/{z}/{x}/{y}.png",
     attribution: "USDA NAIP — Planet Labs",
     type: "xyz",
     resolution: "60cm–1m",
@@ -219,3 +219,28 @@ export const IMAGERY_SOURCES: ImagerySource[] = [
     thumbnail: "🗺️",
   },
 ]
+
+export type AdminLevel = "admin0" | "admin1" | "admin2"
+
+export interface AdminBoundary {
+  id: string
+  name: string
+  level: AdminLevel
+  pcode: string
+  parentPcode?: string
+  parentName?: string
+  center: [number, number]
+  areaSqKm: number
+}
+
+export interface VectorOverlay {
+  id: string
+  name: string
+  visible: boolean
+  color: string
+  opacity: number
+  data?: GeoJSON.FeatureCollection
+  dataUrl?: string
+  type: "admin" | "custom"
+  level?: AdminLevel
+}
