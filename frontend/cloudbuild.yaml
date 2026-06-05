@@ -1,0 +1,9 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag=us-central1-docker.pkg.dev/$PROJECT_ID/realitysync/frontend:latest
+      - --build-arg=API_URL=https://realitysync-api-36pbu2hrsq-ue.a.run.app
+      - .
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/realitysync/frontend:latest

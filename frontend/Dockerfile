@@ -8,12 +8,17 @@ WORKDIR /app
 
 COPY package.json package-lock.json* ./
 
+ARG API_URL
+ARG NEXT_PUBLIC_API_URL
+
 RUN npm ci && npm cache clean --force
 
 COPY . .
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV API_URL=$API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 RUN npm run build
 

@@ -120,12 +120,6 @@ substitutions:
   _ARTIFACT_REGISTRY: us-central1-docker.pkg.dev/${PROJECT_ID}/realitysync
   _CLOUD_SQL_INSTANCE: ${PROJECT_ID}:us-east1:affordable-gadgets-production-pg
 
-artifacts:
-  objects:
-    location: gs://${PROJECT_ID}-cloudbuild-logs/builds/
-    paths:
-      - build.env
-
 timeout: 2400s
 options:
   machineType: E2_HIGHCPU_8
