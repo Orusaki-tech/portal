@@ -1349,6 +1349,227 @@ async def list_imagery_sources(request: Request) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# COG Generation
+# ---------------------------------------------------------------------------
+
+
+class CogGenerateRequest(BaseModel):
+    source_id: str = Field(min_length=1)
+    geojson: dict[str, Any]
+    buffer_meters: int = 0
+    force: bool = False
+    api_key: str | None = None
+
+
+@app.post("/api/imagery/cog")
+async def generate_cog(body: CogGenerateRequest, request: Request) -> Any:
+    """Generate (or retrieve cached) COG for a polygon.
+
+    Supports three source types:
+
+      - **stac** (free) — queries STAC API for the best scene and returns
+        the existing COG URL (no reprocessing). 0 credits.
+      - **commercial** (paid) — downloads raw imagery via the provider's
+        API, warps to EPSG:3857, converts to COG, and uploads to GCS.
+        Requires credits (platform key) or the user's own API key.
+      - **user_upload** — returns the user's own COG URL.
+
+    Response includes ``cog_url`` which can be used with TiTiler:
+    ``/cog/tiles/{z}/{x}/{y}.png?url={cog_url}&geojson={geojson}``
+    """
+    import time
+    from backend.engine.service_layer.cog_service import (
+        get_or_generate_cog,
+        _get_source_type,
+        deduct_credits,
+        _insert_catalog_entry,
+    )
+
+    start = time.time()
+    source_type = _get_source_type(body.source_id)
+    user_id = getattr(request.state, "user_id", None)
+
+    try:
+        if source_type == "commercial" and not body.api_key:
+            # Using platform key — deduct credits first
+            from backend.engine.service_layer.cog_service import estimate_cost
+            est = estimate_cost(body.source_id, body.geojson, body.buffer_meters)
+            cost = est["cost_credits"]
+            if cost > 0 and not est.get("provider_available"):
+                raise HTTPException(status_code=402, detail="No API key configured for this provider")
+            if cost > 0 and user_id:
+                deduct_credits(str(user_id), cost)
+
+        result = get_or_generate_cog(
+            source_id=body.source_id,
+            geojson=body.geojson,
+            buffer_meters=body.buffer_meters,
+            force=body.force,
+            api_key=body.api_key,
+            user_id=str(user_id) if user_id else None,
+        )
+        result["source_type"] = source_type
+        result["duration_ms"] = int((time.time() - start) * 1000)
+
+        # Record in catalog (non-blocking)
+        try:
+            conn = _db_conn_factory()
+            try:
+                from shapely.geometry import shape
+                from shapely.geometry import mapping as mp
+                poly = shape(body.geojson)
+                if body.buffer_meters > 0:
+                    poly = poly.buffer(body.buffer_meters / 111_320.0)
+                _insert_catalog_entry(
+                    conn, body.source_id,
+                    result.get("hash") or "",
+                    result.get("cog_url", ""),
+                    result.get("scene_id"),
+                    poly,
+                    result.get("area_km2", 0),
+                    result.get("resolution"),
+                    result.get("datetime"),
+                    source_type,
+                    result.get("cog_size_bytes") or result.get("size_bytes"),
+                )
+                conn.commit()
+            except Exception:
+                pass  # catalog write is advisory
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"COG generation failed: {e}")
+
+
+@app.post("/api/credits/estimate")
+async def credit_estimate(body: CogGenerateRequest) -> Any:
+    """Preview the credit cost before generating a COG.
+
+    Returns estimated area in km², credit cost, and whether the
+    provider is available (has API key configured).
+    """
+    from backend.engine.service_layer.cog_service import estimate_cost
+
+    return estimate_cost(
+        source_id=body.source_id,
+        geojson=body.geojson,
+        buffer_meters=body.buffer_meters,
+        user_api_key=body.api_key,
+    )
+
+
+@app.post("/api/imagery/cog/overlap")
+async def check_cog_overlap(body: CogGenerateRequest) -> Any:
+    """Check if a cached COG already covers this polygon.
+
+    Returns either an exact match (same hash) or a containing match
+    (a cached COG whose bounding box fully contains the polygon).
+    """
+    from backend.engine.service_layer.cog_service import find_overlapping_cog
+
+    result = find_overlapping_cog(
+        body.source_id, body.geojson, body.buffer_meters
+    )
+    if result:
+        return {"match": result["match"], "match_type": result["match_type"]}
+    return {"match": None, "match_type": "none"}
+
+
+# ---------------------------------------------------------------------------
+# Provider API Key Management (BYOK)
+# ---------------------------------------------------------------------------
+
+
+class SaveProviderKeyRequest(BaseModel):
+    provider_id: str
+    api_key: str
+    label: str = ""
+
+
+@app.post("/api/imagery/provider-keys")
+async def save_provider_key(body: SaveProviderKeyRequest, request: Request) -> Any:
+    """Save a user's own API key for a commercial provider."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    from backend.engine.service_layer.cog_service import _encrypt_key
+
+    encrypted = _encrypt_key(body.api_key)
+    conn = _db_conn_factory()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO provider_api_keys (user_id, provider_id, encrypted_key, label)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (user_id, provider_id)
+                   DO UPDATE SET encrypted_key = EXCLUDED.encrypted_key,
+                                 label = EXCLUDED.label,
+                                 updated_at = NOW()""",
+                (user_id, body.provider_id, encrypted, body.label),
+            )
+        conn.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save key: {e}")
+    finally:
+        conn.close()
+
+    return {"status": "saved", "provider_id": body.provider_id}
+
+
+@app.delete("/api/imagery/provider-keys/{provider_id}")
+async def delete_provider_key(provider_id: str, request: Request) -> Any:
+    """Remove a saved API key for a provider."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = _db_conn_factory()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM provider_api_keys WHERE user_id = %s AND provider_id = %s",
+                (user_id, provider_id),
+            )
+        conn.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete key: {e}")
+    finally:
+        conn.close()
+
+    return {"status": "deleted", "provider_id": provider_id}
+
+
+@app.get("/api/imagery/provider-keys")
+async def list_provider_keys(request: Request) -> Any:
+    """List which providers the user has saved keys for."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    conn = _db_conn_factory()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT provider_id, label, created_at FROM provider_api_keys WHERE user_id = %s ORDER BY provider_id",
+                (user_id,),
+            )
+            rows = cur.fetchall()
+        return {"keys": [dict(r) for r in rows], "total": len(rows)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list keys: {e}")
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # STAC Query
 # ---------------------------------------------------------------------------
 
@@ -1600,3 +1821,149 @@ async def get_batch_progress(job_id: str, request: Request) -> Any:
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+# ---------------------------------------------------------------------------
+# Satellite Imagery Fetch — Two-Phase Pipeline
+# ---------------------------------------------------------------------------
+
+
+class ImageryFetchRequest(BaseModel):
+    source_id: str = Field(min_length=1)
+    geojson: dict[str, Any]
+    buffer_meters: int = 0
+    date_from: str | None = None
+    date_to: str | None = None
+    max_cloud_cover: float = Field(default=0, ge=0, le=100)
+    mosaic: bool = True
+    api_key: str | None = None
+
+
+@app.post("/api/imagery/fetch")
+async def fetch_imagery(body: ImageryFetchRequest, request: Request) -> Any:
+    """Fetch satellite imagery for a polygon.
+
+    Two-phase pipeline:
+
+      **Phase 1 (synchronous, ~1s):** Queries STAC for scenes matching
+      the polygon, date range, and cloud cover filters. Returns a
+      ``preview_url`` (signed COG asset) that can be rendered instantly
+      via ``/cog/tiles/...?url={preview_url}&geojson={geojson}``.
+
+      **Phase 2 (background):** Generates a clipped, cached COG by
+      building a VRT mosaic from the matching scenes, clipping to the
+      polygon+buffer, and uploading to GCS. Poll the status endpoint
+      ``GET /api/imagery/fetch/status/{job_hash}`` until ``"ready"``,
+      then swap to the pre-clipped COG URL (no ``&geojson=`` needed).
+
+    For commercial sources (no STAC preview) Phase 1 = Phase 2 — the
+    response includes ``preview_available: false`` and the caller should
+    poll the status endpoint immediately.
+    """
+    from backend.engine.service_layer.cog_service import (
+        get_preview_scene,
+        generate_clipped_cog_background,
+        _get_source_type,
+        _mosaic_hash,
+        deduct_credits,
+    )
+    from backend.engine.service_layer.exceptions import (
+        SatellitePipelineError,
+        NoScenesFoundError,
+    )
+
+    source_type = _get_source_type(body.source_id)
+    user_id = getattr(request.state, "user_id", None)
+    job_hash = _mosaic_hash(
+        body.geojson, body.source_id, body.buffer_meters,
+        body.date_from, body.date_to, body.max_cloud_cover,
+    )
+
+    if source_type == "stac":
+        try:
+            preview = get_preview_scene(
+                source_id=body.source_id,
+                geojson=body.geojson,
+                buffer_meters=body.buffer_meters,
+                date_from=body.date_from,
+                date_to=body.date_to,
+                max_cloud_cover=body.max_cloud_cover,
+            )
+        except NoScenesFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail="No satellite imagery found for this area with the current filters.",
+            )
+        except SatellitePipelineError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+        generate_clipped_cog_background(
+            source_id=body.source_id,
+            geojson=body.geojson,
+            buffer_meters=body.buffer_meters,
+            date_from=body.date_from,
+            date_to=body.date_to,
+            max_cloud_cover=body.max_cloud_cover,
+            user_id=str(user_id) if user_id else None,
+        )
+
+        return {
+            "status": "preview",
+            "job_hash": job_hash,
+            "preview_available": True,
+            "preview_url": preview["preview_url"],
+            "scene_count": preview["scene_count"],
+            "scene_ids": preview["scene_ids"],
+            "datetime_from": preview["datetime_from"],
+            "datetime_to": preview["datetime_to"],
+            "cloud_cover_avg": preview["cloud_cover_avg"],
+            "resolution": preview["resolution"],
+            "area_km2": preview["area_km2"],
+            "source_type": source_type,
+        }
+
+    elif source_type == "commercial":
+        if not body.api_key:
+            from backend.engine.service_layer.cog_service import estimate_cost
+            est = estimate_cost(body.source_id, body.geojson, body.buffer_meters)
+            cost = est["cost_credits"]
+            if cost > 0 and not est.get("provider_available"):
+                raise HTTPException(status_code=402, detail="No API key configured for this provider")
+            if cost > 0 and user_id:
+                deduct_credits(str(user_id), cost)
+
+        job_hash = generate_clipped_cog_background(
+            source_id=body.source_id,
+            geojson=body.geojson,
+            buffer_meters=body.buffer_meters,
+            date_from=body.date_from,
+            date_to=body.date_to,
+            max_cloud_cover=body.max_cloud_cover,
+            api_key=body.api_key,
+            user_id=str(user_id) if user_id else None,
+        )
+        return {
+            "status": "processing",
+            "job_hash": job_hash,
+            "preview_available": False,
+            "source_type": source_type,
+        }
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Source '{body.source_id}' does not support COG generation.")
+
+
+@app.get("/api/imagery/fetch/status/{job_hash}")
+async def fetch_imagery_status(job_hash: str) -> Any:
+    """Poll the status of a background clipped-COG generation job.
+
+    Returns ``{"status": "processing"}`` while the job runs,
+    ``{"status": "ready", "cog_url": "...", ...}`` on completion, or
+    ``{"status": "error", "error": "..."}`` on failure.
+    """
+    from backend.engine.service_layer.cog_service import get_job_status
+
+    status = get_job_status(job_hash)
+    if status is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return status

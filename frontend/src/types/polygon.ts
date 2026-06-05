@@ -220,6 +220,36 @@ export const IMAGERY_SOURCES: ImagerySource[] = [
   },
 ]
 
+export interface ImageryFetchRequest {
+  source_id: string
+  geojson: GeoJSON.GeoJSON
+  buffer_meters: number
+  date_from?: string
+  date_to?: string
+  max_cloud_cover: number
+  mosaic: boolean
+}
+
+export type FetchStatus = "idle" | "previewing" | "processing" | "ready" | "error"
+
+export interface ImageryFetchResponse {
+  status: "preview" | "processing" | "ready" | "error"
+  job_hash: string
+  preview_available: boolean
+  preview_url?: string
+  cog_url?: string
+  scene_count?: number
+  scene_ids?: string[]
+  datetime_from?: string
+  datetime_to?: string
+  cloud_cover_avg?: number
+  resolution?: number
+  area_km2?: number
+  source_type?: string
+  cached?: boolean
+  error?: string
+}
+
 export type AdminLevel = "admin0" | "admin1" | "admin2"
 
 export interface AdminBoundary {

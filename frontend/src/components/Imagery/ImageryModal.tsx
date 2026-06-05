@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import maplibregl from "maplibre-gl"
 import "maplibre-gl/dist/maplibre-gl.css"
 import * as turf from "@turf/turf"
-import type { ImagerySource, AdminLevel } from "@/types/polygon"
+import type { ImagerySource, AdminLevel, FetchStatus, ImageryFetchResponse } from "@/types/polygon"
 
 interface ImageryModalProps {
   open: boolean
@@ -16,8 +16,8 @@ interface ImageryModalProps {
   onClose: () => void
 }
 
-const TITILER_URL = "https://realitysync-titiler-111963419931.us-east1.run.app"
 const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+const GUEST_API_KEY = "92cbb94d69272601c680040452c109036fdba9b469aaee005fdf386bb67b9677"
 
 function computeBbox(feature?: GeoJSON.Feature): [number, number, number, number] {
   if (!feature?.geometry) return [37, -4, 38, 4]
@@ -36,6 +36,44 @@ function computeBbox(feature?: GeoJSON.Feature): [number, number, number, number
   return [minX, minY, maxX, maxY]
 }
 
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function threeMonthsAgo(): string {
+  const d = new Date()
+  d.setMonth(d.getMonth() - 3)
+  return d.toISOString().slice(0, 10)
+}
+
+async function fetchApi<T>(path: string, body: unknown): Promise<T> {
+  let apiKey: string | null = null
+  if (typeof window !== "undefined") {
+    apiKey = localStorage.getItem("realitysync_api_key")
+    if (!apiKey) {
+      try {
+        const user = JSON.parse(localStorage.getItem("realitysync_user") || "{}")
+        apiKey = user.api_key || null
+      } catch {}
+    }
+  }
+  if (!apiKey) apiKey = GUEST_API_KEY
+
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || "Request failed")
+  }
+  return res.json()
+}
+
 export default function ImageryModal({
   open,
   feature,
@@ -45,16 +83,28 @@ export default function ImageryModal({
   userSources,
   onClose,
 }: ImageryModalProps) {
+  // Form controls
   const [buffer, setBuffer] = useState(0)
   const [activeSourceId, setActiveSourceId] = useState(selectedSource.id)
-  const [downloading, setDownloading] = useState<string | null>(null)
+  const [dateFrom, setDateFrom] = useState(threeMonthsAgo())
+  const [dateTo, setDateTo] = useState(todayISO())
+  const [maxCloudCover, setMaxCloudCover] = useState(0)
 
+  // Two-phase pipeline state
+  const [fetchStatus, setFetchStatus] = useState<FetchStatus>("idle")
+  const [fetchResult, setFetchResult] = useState<ImageryFetchResponse | null>(null)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState<string | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Map state
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const mapReady = useRef(false)
 
   const allSources = [selectedSource, ...userSources.filter((s) => s.id !== selectedSource.id)]
   const activeSource = allSources.find((s) => s.id === activeSourceId) || selectedSource
+  const isCommercial = ["planet", "maxar", "airbus", "blacksky"].includes(activeSource.id)
 
   const buffered = useMemo(() => {
     if (!open || buffer <= 0 || !feature?.geometry) return null
@@ -71,35 +121,133 @@ export default function ImageryModal({
     return feature
   }, [feature, buffer, buffered, open])
 
-  // COG URL from the active source
-  const sourceCogUrl = useMemo(() => {
-    const url = activeSource.tileUrl
-    if (!url) return null
-    const m = url.match(/[?&]url=([^&]+)/)
-    return m ? decodeURIComponent(m[1]) : null
-  }, [activeSource])
-
-  // TiTiler tile URL with geojson clipping (only for COG sources)
-  const cogTileUrl = useMemo(() => {
-    if (!sourceCogUrl || !region?.geometry) return null
-    const geojson = JSON.stringify(region.geometry)
-    return `/cog/tiles/{z}/{x}/{y}.png?url=${encodeURIComponent(sourceCogUrl)}&geojson=${encodeURIComponent(geojson)}`
-  }, [sourceCogUrl, region])
-
   const regionBbox = useMemo(() => {
     return region ? computeBbox(region) : [37, -4, 38, 4]
   }, [region])
 
-  const cropParams = useMemo(() => {
-    if (!sourceCogUrl || !open) return null
-    const p = new URLSearchParams()
-    p.set("url", sourceCogUrl)
-    if (region?.geometry) {
-      p.set("bbox", turf.bbox(region).join(","))
-    }
-    return p
-  }, [sourceCogUrl, region, open])
+  // TiTiler tile URLs
+  const previewTileUrl = useMemo(() => {
+    if (fetchStatus !== "previewing" || !fetchResult?.preview_url || !region?.geometry) return null
+    return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.preview_url)}&geojson=${encodeURIComponent(JSON.stringify(region.geometry))}`
+  }, [fetchStatus, fetchResult, region])
 
+  const cogTileUrl = useMemo(() => {
+    if (fetchStatus !== "ready" || !fetchResult?.cog_url) return null
+    return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.cog_url)}`
+  }, [fetchStatus, fetchResult])
+
+  const activeTileUrl = cogTileUrl || previewTileUrl
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [])
+
+  // Submit fetch request
+  const handleFetch = useCallback(async () => {
+    if (!feature?.geometry) return
+    setFetchStatus("previewing")
+    setFetchError(null)
+    setFetchResult(null)
+
+    try {
+      const res = await fetchApi<ImageryFetchResponse>("/api/imagery/fetch", {
+        source_id: activeSourceId,
+        geojson: feature.geometry,
+        buffer_meters: buffer,
+        date_from: dateFrom,
+        date_to: dateTo,
+        max_cloud_cover: maxCloudCover,
+        mosaic: true,
+      })
+
+      if (res.status === "preview") {
+        setFetchResult(res)
+
+        if (res.job_hash) {
+          if (pollRef.current) clearInterval(pollRef.current)
+          pollRef.current = setInterval(async () => {
+            try {
+              const resp = await fetch(`/api/imagery/fetch/status/${res.job_hash}`)
+              if (!resp.ok) {
+                if (resp.status === 404) return
+                throw new Error(resp.statusText)
+              }
+              const status = await resp.json()
+              if (status.status === "ready" && status.result) {
+                setFetchResult((prev) => ({ ...prev, ...status.result, status: "ready" }))
+                setFetchStatus("ready")
+                if (pollRef.current) clearInterval(pollRef.current)
+                pollRef.current = null
+              } else if (status.status === "error") {
+                setFetchError(status.error || "Background processing failed")
+                setFetchStatus("error")
+                if (pollRef.current) clearInterval(pollRef.current)
+                pollRef.current = null
+              }
+            } catch {
+              // poll continues silently
+            }
+          }, 2000)
+        }
+      } else if (res.status === "processing") {
+        setFetchResult(res)
+        setFetchStatus("processing")
+
+        if (res.job_hash) {
+          if (pollRef.current) clearInterval(pollRef.current)
+          pollRef.current = setInterval(async () => {
+            try {
+              const resp = await fetch(`/api/imagery/fetch/status/${res.job_hash}`)
+              if (!resp.ok) {
+                if (resp.status === 404) return
+                throw new Error(resp.statusText)
+              }
+              const status = await resp.json()
+              if (status.status === "ready" && status.result) {
+                setFetchResult((prev) => ({ ...prev, ...status.result, status: "ready" }))
+                setFetchStatus("ready")
+                if (pollRef.current) clearInterval(pollRef.current)
+                pollRef.current = null
+              } else if (status.status === "error") {
+                setFetchError(status.error || "Background processing failed")
+                setFetchStatus("error")
+                if (pollRef.current) clearInterval(pollRef.current)
+                pollRef.current = null
+              }
+            } catch {
+              // poll continues silently
+            }
+          }, 2000)
+        }
+      } else {
+        throw new Error("Unexpected response status")
+      }
+    } catch (err) {
+      setFetchError(err instanceof Error ? err.message : "Unknown error")
+      setFetchStatus("error")
+    }
+  }, [feature, activeSourceId, buffer, dateFrom, dateTo, maxCloudCover])
+
+  // Cancel polling and reset
+  const resetState = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+    setBuffer(0)
+    setDateFrom(threeMonthsAgo())
+    setDateTo(todayISO())
+    setMaxCloudCover(0)
+    setFetchStatus("idle")
+    setFetchResult(null)
+    setFetchError(null)
+    setDownloading(null)
+  }, [])
+
+  // Map management
   const resetMap = useCallback(() => {
     if (mapRef.current) {
       mapRef.current.remove()
@@ -111,24 +259,24 @@ export default function ImageryModal({
   useEffect(() => {
     if (!open) {
       resetMap()
-      setBuffer(0)
-      setDownloading(null)
+      resetState()
       return
     }
-    setBuffer(0)
-  }, [open, resetMap])
+    resetState()
+  }, [open, resetMap, resetState])
 
-  // Helper to add/remove COG tile layer
-  const syncCogLayer = useCallback((m: maplibregl.Map) => {
-    if (m.getLayer("cog-tiles-layer")) {
-      m.removeLayer("cog-tiles-layer")
-      m.removeSource("cog-tiles")
+  const syncLayer = useCallback((m: maplibregl.Map, tileUrl: string | null) => {
+    const layerId = "imagery-tiles-layer"
+    const sourceId = "imagery-tiles"
+    if (m.getLayer(layerId)) {
+      m.removeLayer(layerId)
+      m.removeSource(sourceId)
     }
-    if (cogTileUrl) {
-      m.addSource("cog-tiles", { type: "raster", tiles: [cogTileUrl], tileSize: 256 })
-      m.addLayer({ id: "cog-tiles-layer", type: "raster", source: "cog-tiles" })
+    if (tileUrl) {
+      m.addSource(sourceId, { type: "raster", tiles: [tileUrl], tileSize: 256 })
+      m.addLayer({ id: layerId, type: "raster", source: sourceId })
     }
-  }, [cogTileUrl])
+  }, [])
 
   // Initialize map
   useEffect(() => {
@@ -143,14 +291,9 @@ export default function ImageryModal({
     })
 
     m.on("load", () => {
-      // Layer 1 (bottom): OSM reference tiles everywhere
       m.addSource("base-tiles", { type: "raster", tiles: [OSM_TILES], tileSize: 256 })
       m.addLayer({ id: "base-tiles-layer", type: "raster", source: "base-tiles" })
 
-      // Layer 2: COG tiles clipped to polygon (TiTiler returns transparent pixels outside)
-      syncCogLayer(m)
-
-      // Layer 3: Selected polygon fill + outline
       m.addSource("selected-polygon", { type: "geojson", data: feature })
       m.addLayer({
         id: "selected-polygon-fill",
@@ -165,7 +308,6 @@ export default function ImageryModal({
         paint: { "line-color": "#2563eb", "line-width": 2, "line-opacity": 0.9 },
       })
 
-      // Layer 4: Buffer outline
       if (buffer > 0 && buffered) {
         m.addSource("buffer-polygon", { type: "geojson", data: buffered })
         m.addLayer({
@@ -174,6 +316,10 @@ export default function ImageryModal({
           source: "buffer-polygon",
           paint: { "line-color": "#f59e0b", "line-width": 2, "line-opacity": 0.8, "line-dasharray": [5, 5] },
         })
+      }
+
+      if (activeTileUrl) {
+        syncLayer(m, activeTileUrl)
       }
 
       m.fitBounds([[regionBbox[0], regionBbox[1]], [regionBbox[2], regionBbox[3]]], { padding: 40 })
@@ -190,14 +336,14 @@ export default function ImageryModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  // Sync COG layer when source or buffer changes
+  // Sync tile layer when URL changes
   useEffect(() => {
     const m = mapRef.current
     if (!m || !mapReady.current) return
-    syncCogLayer(m)
-  }, [cogTileUrl, syncCogLayer])
+    syncLayer(m, activeTileUrl)
+  }, [activeTileUrl, syncLayer])
 
-  // Update buffer outline + fit bounds
+  // Update buffer outline
   useEffect(() => {
     const m = mapRef.current
     if (!m || !mapReady.current) return
@@ -219,30 +365,18 @@ export default function ImageryModal({
     m.fitBounds([[regionBbox[0], regionBbox[1]], [regionBbox[2], regionBbox[3]]], { padding: 40 })
   }, [buffer, buffered, regionBbox])
 
-  const download = async (format: "tif" | "png" | "jpg") => {
-    if (!cropParams) return
-    setDownloading(format)
-    try {
-      const ext = format === "tif" ? "tif" : format === "png" ? "png" : "jpg"
-      const url = `/cog/crop.${ext}?${cropParams.toString()}`
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `${name.replace(/\s+/g, "_")}_${level}_buffer_${buffer}m.${ext}`
-      a.click()
-    } catch {
-      const url = `/cog/crop.${format === "tif" ? "tif" : format === "png" ? "png" : "jpg"}?${cropParams.toString()}`
-      window.open(url, "_blank")
-    } finally {
-      setDownloading(null)
-    }
-  }
+  // Export handlers
+  const downloadGeoTiff = useCallback(async () => {
+    if (!fetchResult?.cog_url) return
+    setDownloading("tif")
+    const a = document.createElement("a")
+    a.href = fetchResult.cog_url
+    a.download = `${name.replace(/\s+/g, "_")}_${level}_buffer_${buffer}m.tif`
+    a.click()
+    setDownloading(null)
+  }, [fetchResult, name, level, buffer])
 
-  const openTitilerViewer = () => {
-    if (!sourceCogUrl) return
-    window.open(`${TITILER_URL}/viewer?url=${encodeURIComponent(sourceCogUrl)}`, "_blank")
-  }
-
-  const exportFromMap = (format: "png" | "jpg") => {
+  const exportFromMap = useCallback((format: "png" | "jpg") => {
     const m = mapRef.current
     if (!m) return
     const canvas = m.getCanvas()
@@ -254,9 +388,19 @@ export default function ImageryModal({
       link.href = canvas.toDataURL("image/png")
     }
     link.click()
-  }
+  }, [name, level, buffer])
+
+  // Source change resets fetch
+  const handleSourceChange = useCallback((newId: string) => {
+    setActiveSourceId(newId)
+    setFetchStatus("idle")
+    setFetchResult(null)
+    setFetchError(null)
+  }, [])
 
   if (!open) return null
+
+  const btnDisabled = fetchStatus === "previewing" || fetchStatus === "processing"
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -265,7 +409,12 @@ export default function ImageryModal({
         <div className="flex items-center justify-between border-b px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold">{name}</h2>
-            <p className="text-xs text-gray-500">{level.toUpperCase()} &mdash; Buffer: {buffer}m</p>
+            <p className="text-xs text-gray-500">
+              {level.toUpperCase()} &mdash; Buffer: {buffer}m
+              {fetchResult?.source_type && (
+                <span className="ml-2 text-blue-500">[{fetchResult.source_type}]</span>
+              )}
+            </p>
           </div>
           <button onClick={onClose} className="rounded p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -274,8 +423,8 @@ export default function ImageryModal({
           </button>
         </div>
 
-        {/* Buffer control */}
-        <div className="flex items-center gap-4 border-b px-6 py-3">
+        {/* Controls bar */}
+        <div className="flex flex-wrap items-center gap-4 border-b px-6 py-3">
           <div className="flex items-center gap-2">
             <label className="text-xs font-medium text-gray-600">Buffer:</label>
             <input
@@ -285,54 +434,150 @@ export default function ImageryModal({
               step={100}
               value={buffer}
               onChange={(e) => setBuffer(Number(e.target.value))}
-              className="w-32"
+              className="w-24"
             />
-            <span className="w-16 text-right text-xs text-gray-500">{buffer}m</span>
+            <span className="w-14 text-right text-xs text-gray-500">{buffer}m</span>
           </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-gray-600">From:</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="rounded border border-gray-300 px-2 py-1 text-xs"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-gray-600">To:</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="rounded border border-gray-300 px-2 py-1 text-xs"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-gray-600">Cloud:</label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={maxCloudCover}
+              onChange={(e) => setMaxCloudCover(Number(e.target.value))}
+              className="w-20"
+            />
+            <span className="w-10 text-right text-xs text-gray-500">{maxCloudCover}%</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-gray-600">Source:</label>
+            <select
+              value={activeSourceId}
+              onChange={(e) => handleSourceChange(e.target.value)}
+              className="rounded border border-gray-300 px-2 py-1 text-sm"
+            >
+              {allSources.map((s) => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={handleFetch}
+            disabled={btnDisabled}
+            className="rounded bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {btnDisabled ? "Fetching..." : "Fetch Satellite Data"}
+          </button>
         </div>
 
-        {/* Map — OSM everywhere + COG clipped to polygon */}
+        {/* Status bar */}
+        <div className="flex items-center justify-between border-b px-6 py-1.5">
+          <div className="flex items-center gap-3 text-xs">
+            {fetchStatus === "previewing" && (
+              <span className="text-blue-600">Preview loaded — generating clipped COG...</span>
+            )}
+            {fetchStatus === "processing" && (
+              <span className="text-amber-600">Processing satellite data...</span>
+            )}
+            {fetchStatus === "ready" && (
+              <span className="text-green-600">
+                {fetchResult?.cached ? "Cached" : "Ready"}
+                {fetchResult?.scene_count && <> &middot; {fetchResult.scene_count} scene{fetchResult.scene_count > 1 ? "s" : ""}</>}
+                {fetchResult?.cloud_cover_avg !== undefined && <> &middot; {fetchResult.cloud_cover_avg}% cloud avg</>}
+                {fetchResult?.datetime_from && <> &middot; {fetchResult.datetime_from.slice(0, 10)}</>}
+                {fetchResult?.datetime_to && fetchResult.datetime_to !== fetchResult.datetime_from && <> to {fetchResult.datetime_to.slice(0, 10)}</>}
+                {fetchResult?.resolution && <> &middot; {fetchResult.resolution}m</>}
+              </span>
+            )}
+            {fetchStatus === "error" && (
+              <span className="text-red-600">{fetchError || "Failed to load imagery"}</span>
+            )}
+            {fetchStatus === "idle" && (
+              <span className="text-gray-400">Configure filters and click "Fetch Satellite Data"</span>
+            )}
+            {fetchResult?.area_km2 && (
+              <span className="ml-2 text-gray-400">{fetchResult.area_km2.toFixed(2)} km²</span>
+            )}
+          </div>
+
+          {/* Error action buttons */}
+          {fetchStatus === "error" && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setMaxCloudCover((c) => Math.min(100, c + 25))}
+                className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
+              >
+                Raise cloud cover
+              </button>
+              <button
+                onClick={() => {
+                  setDateFrom(threeMonthsAgo())
+                  setDateTo(todayISO())
+                }}
+                className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
+              >
+                Expand dates
+              </button>
+              <button
+                onClick={handleFetch}
+                className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800 hover:bg-blue-200"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Map */}
         <div className="flex-1">
           <div ref={mapContainer} className="h-full w-full" />
         </div>
 
-        {/* Footer — source selector + download buttons */}
+        {/* Footer — export */}
         <div className="flex items-center justify-between border-t px-6 py-3">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-gray-600">Source for export:</label>
-            <select
-              value={activeSourceId}
-              onChange={(e) => setActiveSourceId(e.target.value)}
-              className="rounded border border-gray-300 px-2 py-1 text-sm"
-            >
-              {allSources.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            {sourceCogUrl ? (
-              <>
-                <button
-                  onClick={openTitilerViewer}
-                  className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
-                >
-                  View in TiTiler
-                </button>
-                <button
-                  onClick={() => download("tif")}
-                  disabled={downloading !== null}
-                  className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {downloading === "tif" ? "Downloading..." : "GeoTIFF"}
-                </button>
-              </>
-            ) : (
-              <span className="text-xs text-amber-600">
-                Upload imagery to enable satellite overlay &amp; GeoTIFF
+          <div className="text-xs text-gray-400">
+            {fetchStatus === "ready" && fetchResult?.scene_ids && fetchResult.scene_ids.length > 0 && (
+              <span title={fetchResult.scene_ids.join(", ")}>
+                Scene{fetchResult.scene_ids.length > 1 ? "s" : ""}: {fetchResult.scene_ids.slice(0, 3).join(", ")}
+                {fetchResult.scene_ids.length > 3 && ` +${fetchResult.scene_ids.length - 3} more`}
               </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {fetchStatus === "ready" && fetchResult?.cog_url && (
+              <button
+                onClick={downloadGeoTiff}
+                disabled={downloading !== null}
+                className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {downloading === "tif" ? "Downloading..." : "GeoTIFF"}
+              </button>
             )}
             <button
               onClick={() => exportFromMap("png")}
