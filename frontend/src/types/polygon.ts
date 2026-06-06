@@ -220,6 +220,13 @@ export const IMAGERY_SOURCES: ImagerySource[] = [
   },
 ]
 
+export interface PreprocessingOptions {
+  cloud_mask?: boolean
+  cloud_mask_method?: "scl" | "qa_pixel" | "s2cloudless"
+  speckle_filter?: boolean
+  pansharpen?: false | "brovey" | "pca" | "ihs"
+}
+
 export interface ImageryFetchRequest {
   source_id: string
   geojson: GeoJSON.GeoJSON
@@ -228,6 +235,7 @@ export interface ImageryFetchRequest {
   date_to?: string
   max_cloud_cover: number
   mosaic: boolean
+  preprocessing?: PreprocessingOptions
 }
 
 export type FetchStatus = "idle" | "previewing" | "processing" | "ready" | "error"
@@ -248,6 +256,7 @@ export interface ImageryFetchResponse {
   source_type?: string
   cached?: boolean
   error?: string
+  preprocessing_applied?: string[]
 }
 
 export type AdminLevel = "admin0" | "admin1" | "admin2"

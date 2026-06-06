@@ -1837,6 +1837,10 @@ class ImageryFetchRequest(BaseModel):
     max_cloud_cover: float = Field(default=0, ge=0, le=100)
     mosaic: bool = True
     api_key: str | None = None
+    preprocessing: dict[str, Any] | None = None
+    """User-specified preprocessing overrides. Structure: {step_name: {option: value}}.
+       Empty dict or null uses source defaults. Example:
+       {"cloud_mask": {"method": "scl"}, "speckle_filter": {"window_size": 5}}"""
 
 
 @app.post("/api/imagery/fetch")
@@ -1905,6 +1909,7 @@ async def fetch_imagery(body: ImageryFetchRequest, request: Request) -> Any:
             date_to=body.date_to,
             max_cloud_cover=body.max_cloud_cover,
             user_id=str(user_id) if user_id else None,
+            preprocessing_opts=body.preprocessing,
         )
 
         return {
@@ -1941,6 +1946,7 @@ async def fetch_imagery(body: ImageryFetchRequest, request: Request) -> Any:
             max_cloud_cover=body.max_cloud_cover,
             api_key=body.api_key,
             user_id=str(user_id) if user_id else None,
+            preprocessing_opts=body.preprocessing,
         )
         return {
             "status": "processing",

@@ -22,6 +22,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
+from backend.engine.service_layer.preprocessing import build_pipeline as _build_pp
+
 from shapely.geometry import mapping, shape
 
 # ---------------------------------------------------------------------------
@@ -42,13 +44,15 @@ def _db_conn_factory():
         password=os.environ.get("DB_PASSWORD", "realitysync"),
     )
 
-SOURCE_CONFIG: dict[str, dict[str, str | None]] = {
+SOURCE_CONFIG: dict[str, dict[str, Any]] = {
     "naip": {
         "type": "stac",
         "stac_url": "https://planetarycomputer.microsoft.com/api/stac/v1",
         "collection": "naip",
         "asset_key": "image",
         "cloud_cover_field": None,
+        "auxiliary_assets": {},
+        "pipeline": [],
     },
     "sentinel-2-l2a": {
         "type": "stac",
@@ -56,6 +60,13 @@ SOURCE_CONFIG: dict[str, dict[str, str | None]] = {
         "collection": "sentinel-2-l2a",
         "asset_key": "visual",
         "cloud_cover_field": "eo:cloud_cover",
+        "auxiliary_assets": {
+            "scl": "SCL",
+        },
+        "pipeline": [
+            {"step": "cloud_mask", "defaults": {"method": "scl", "aux_key": "scl",
+             "mask_values": [3, 7, 8, 9, 10]}},
+        ],
     },
     "landsat-c2-l2": {
         "type": "stac",
@@ -63,6 +74,13 @@ SOURCE_CONFIG: dict[str, dict[str, str | None]] = {
         "collection": "landsat-c2-l2",
         "asset_key": "rendered_preview",
         "cloud_cover_field": "eo:cloud_cover",
+        "auxiliary_assets": {
+            "qa_pixel": "qa_pixel",
+        },
+        "pipeline": [
+            {"step": "cloud_mask", "defaults": {"method": "qa_pixel", "aux_key": "qa_pixel",
+             "cloud_bits": [3, 4]}},
+        ],
     },
     "sentinel-1-rtc": {
         "type": "stac",
@@ -70,6 +88,10 @@ SOURCE_CONFIG: dict[str, dict[str, str | None]] = {
         "collection": "sentinel-1-rtc",
         "asset_key": "visual",
         "cloud_cover_field": None,
+        "auxiliary_assets": {},
+        "pipeline": [
+            {"step": "speckle_filter", "defaults": {"window_size": 7}},
+        ],
     },
     "cop-dem-glo-30": {
         "type": "stac",
@@ -77,6 +99,8 @@ SOURCE_CONFIG: dict[str, dict[str, str | None]] = {
         "collection": "cop-dem-glo-30",
         "asset_key": "data",
         "cloud_cover_field": None,
+        "auxiliary_assets": {},
+        "pipeline": [],
     },
     "cbers-4-mux": {
         "type": "stac",
@@ -84,6 +108,8 @@ SOURCE_CONFIG: dict[str, dict[str, str | None]] = {
         "collection": "CBERS4-MUX",
         "asset_key": "image",
         "cloud_cover_field": "eo:cloud_cover",
+        "auxiliary_assets": {},
+        "pipeline": [],
     },
     "amazonia-1-wfi": {
         "type": "stac",
@@ -91,6 +117,8 @@ SOURCE_CONFIG: dict[str, dict[str, str | None]] = {
         "collection": "AMAZONIA1-WFI",
         "asset_key": "image",
         "cloud_cover_field": "eo:cloud_cover",
+        "auxiliary_assets": {},
+        "pipeline": [],
     },
 }
 
@@ -514,6 +542,10 @@ class Scene:
     datetime: str | None = None
     footprint: Any = None
     resolution: float | None = None
+    aux_urls: dict[str, str] | None = None
+    """Auxiliary asset URLs keyed by name (e.g. {"scl": "https://...", "qa_pixel": "..."})."""
+    properties: dict | None = None
+    """Miscellaneous scene properties (sun_azimuth, sun_elevation, ...)."""
 
 
 def _mosaic_hash(
@@ -592,6 +624,21 @@ def _query_stac_scenes(
         cc = item.properties.get("eo:cloud_cover") if cc_field else None
         gsd = item.properties.get("gsd") or item.properties.get("eo:gsd", 0)
 
+        # Collect auxiliary asset URLs for preprocessing
+        aux_urls: dict[str, str] = {}
+        aux_cfg = cfg.get("auxiliary_assets", {})
+        for aux_name, aux_key in aux_cfg.items():
+            aux_asset = item.assets.get(aux_key)
+            if aux_asset and aux_asset.href:
+                aux_urls[aux_name] = aux_asset.href
+
+        # Extract key scene properties (sun angles for topographic correction)
+        props: dict[str, Any] = {}
+        for stac_key in ("sun_azimuth", "sun_elevation", "view:sun_azimuth", "view:sun_elevation"):
+            val = item.properties.get(stac_key)
+            if val is not None:
+                props[stac_key.replace("view:", "")] = val
+
         scenes.append(Scene(
             id=item.id,
             url=asset.href,
@@ -599,6 +646,8 @@ def _query_stac_scenes(
             datetime=item.properties.get("datetime"),
             footprint=shape(item.geometry) if item.geometry else None,
             resolution=float(gsd) if gsd else None,
+            aux_urls=aux_urls or None,
+            properties=props or None,
         ))
 
     if cc_field:
@@ -752,6 +801,7 @@ def generate_clipped_cog_background(
     max_cloud_cover: float = 100,
     api_key: str | None = None,
     user_id: str | None = None,
+    preprocessing_opts: dict[str, Any] | None = None,
 ) -> str:
     job_hash = _mosaic_hash(geojson, source_id, buffer_meters, date_from, date_to, max_cloud_cover)
 
@@ -761,6 +811,7 @@ def generate_clipped_cog_background(
                 source_id, geojson, buffer_meters,
                 date_from, date_to, max_cloud_cover,
                 api_key, user_id,
+                preprocessing_opts=preprocessing_opts,
             )
             _complete_job(job_hash, result)
         except Exception as e:
@@ -781,6 +832,7 @@ def _generate_clipped_cog_sync(
     max_cloud_cover: float = 100,
     api_key: str | None = None,
     user_id: str | None = None,
+    preprocessing_opts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_type = _get_source_type(source_id)
     job_hash = _mosaic_hash(geojson, source_id, buffer_meters, date_from, date_to, max_cloud_cover)
@@ -828,6 +880,53 @@ def _generate_clipped_cog_sync(
                 )
 
             inputs = [acquire_local_path(s, tmpdir) for s in scenes]
+
+            # --- Preprocessing pipeline ---
+            cfg = SOURCE_CONFIG.get(source_id, {})
+            pipeline_cfg_list = cfg.get("pipeline", [])
+            has_topo = any(s["step"] == "topographic_correction" for s in pipeline_cfg_list)
+
+            # Query Copernicus DEM if topographic correction is requested
+            dem_vrt_path = None
+            if has_topo:
+                try:
+                    dem_scenes = _query_stac_scenes("cop-dem-glo-30", geojson, buffer_meters)
+                    if dem_scenes:
+                        dem_paths = [acquire_local_path(s, tmpdir) for s in dem_scenes]
+                        if len(dem_paths) == 1:
+                            dem_vrt_path = dem_paths[0]
+                        else:
+                            dem_vrt_path = _build_vrt_mosaic(dem_paths, tmpdir)
+                except Exception:
+                    logger.exception("Failed to query DEM for topographic correction")
+
+            pipeline = _build_pp(source_id, cfg, preprocessing_opts)
+            all_aux_paths: list[dict[str, str]] = [{} for _ in scenes]
+            if pipeline:
+                for i, (scene, input_path) in enumerate(zip(scenes, inputs)):
+                    aux_paths: dict[str, str] = {}
+                    if scene.aux_urls:
+                        for aux_name, aux_url in scene.aux_urls.items():
+                            aux_item = Scene(id=f"{scene.id}_{aux_name}", url=aux_url)
+                            aux_paths[aux_name] = acquire_local_path(aux_item, tmpdir)
+
+                    # Pass DEM and sun angles for topographic correction
+                    if dem_vrt_path:
+                        aux_paths["dem"] = dem_vrt_path
+                        props_sidecar = os.path.join(tmpdir, f"{scene.id}_props.json")
+                        with open(props_sidecar, "w") as f:
+                            json.dump({
+                                "sun_azimuth": (scene.properties or {}).get("sun_azimuth"),
+                                "sun_elevation": (scene.properties or {}).get("sun_elevation"),
+                            }, f)
+                        aux_paths["scene_props"] = props_sidecar
+
+                    inputs[i] = pipeline.run(input_path, aux_paths, tmpdir)
+                    all_aux_paths[i] = aux_paths
+
+                # Run batch steps (radiometric normalization)
+                inputs = pipeline.batch_process(inputs, scenes, all_aux_paths, tmpdir)
+            # --- End preprocessing ---
 
             if len(inputs) == 1:
                 input_path = inputs[0]
@@ -917,6 +1016,11 @@ def _generate_clipped_cog_sync(
         except Exception:
             pass
 
+        # Determine what preprocessing steps were applied
+        pp_steps = []
+        if pipeline_cfg_list:
+            pp_steps = [s["step"] for s in pipeline_cfg_list]
+
         return {
             "cog_url": cog_url,
             "scene_ids": metadata.get("scene_ids", []),
@@ -929,6 +1033,7 @@ def _generate_clipped_cog_sync(
             "cached": False,
             "hash": job_hash,
             "source_type": source_type,
+            "preprocessing_applied": pp_steps,
         }
 
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import maplibregl from "maplibre-gl"
 import "maplibre-gl/dist/maplibre-gl.css"
 import * as turf from "@turf/turf"
-import type { ImagerySource, AdminLevel, FetchStatus, ImageryFetchResponse } from "@/types/polygon"
+import type { ImagerySource, AdminLevel, FetchStatus, ImageryFetchResponse, PreprocessingOptions } from "@/types/polygon"
 
 interface ImageryModalProps {
   open: boolean
@@ -90,6 +90,19 @@ export default function ImageryModal({
   const [dateTo, setDateTo] = useState(todayISO())
   const [maxCloudCover, setMaxCloudCover] = useState(0)
 
+  // Preprocessing options
+  const [preprocEnabled, setPreprocEnabled] = useState(true)
+  const [cloudMaskMethod, setCloudMaskMethod] = useState<"scl" | "qa_pixel" | "s2cloudless">("scl")
+  const [speckleFilter, setSpeckleFilter] = useState(true)
+  const [pansharpenAlgo, setPansharpenAlgo] = useState<false | "brovey" | "pca" | "ihs">(false)
+
+  const prepOptions: PreprocessingOptions = {
+    cloud_mask: preprocEnabled,
+    cloud_mask_method: cloudMaskMethod,
+    speckle_filter: speckleFilter,
+    pansharpen: pansharpenAlgo,
+  }
+
   // Two-phase pipeline state
   const [fetchStatus, setFetchStatus] = useState<FetchStatus>("idle")
   const [fetchResult, setFetchResult] = useState<ImageryFetchResponse | null>(null)
@@ -153,6 +166,12 @@ export default function ImageryModal({
     setFetchResult(null)
 
     try {
+      const pp = preprocEnabled ? {
+        cloud_mask_method: cloudMaskMethod,
+        speckle_filter: speckleFilter,
+        pansharpen: pansharpenAlgo,
+      } : null
+
       const res = await fetchApi<ImageryFetchResponse>("/api/imagery/fetch", {
         source_id: activeSourceId,
         geojson: feature.geometry,
@@ -161,6 +180,7 @@ export default function ImageryModal({
         date_to: dateTo,
         max_cloud_cover: maxCloudCover,
         mosaic: true,
+        preprocessing: pp,
       })
 
       if (res.status === "preview") {
@@ -229,7 +249,7 @@ export default function ImageryModal({
       setFetchError(err instanceof Error ? err.message : "Unknown error")
       setFetchStatus("error")
     }
-  }, [feature, activeSourceId, buffer, dateFrom, dateTo, maxCloudCover])
+  }, [feature, activeSourceId, buffer, dateFrom, dateTo, maxCloudCover, preprocEnabled, cloudMaskMethod, speckleFilter, pansharpenAlgo])
 
   // Cancel polling and reset
   const resetState = useCallback(() => {
@@ -241,6 +261,10 @@ export default function ImageryModal({
     setDateFrom(threeMonthsAgo())
     setDateTo(todayISO())
     setMaxCloudCover(0)
+    setPreprocEnabled(true)
+    setCloudMaskMethod("scl")
+    setSpeckleFilter(true)
+    setPansharpenAlgo(false)
     setFetchStatus("idle")
     setFetchResult(null)
     setFetchError(null)
@@ -473,6 +497,60 @@ export default function ImageryModal({
             <span className="w-10 text-right text-xs text-gray-500">{maxCloudCover}%</span>
           </div>
 
+          {/* Preprocessing toggles */}
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-700">
+              Preprocessing {preprocEnabled ? "🟢" : "⚪"}
+            </summary>
+            <div className="absolute z-10 mt-1 rounded border bg-white p-3 shadow-lg">
+              <label className="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={preprocEnabled} onChange={(e) => setPreprocEnabled(e.target.checked)} />
+                Enable preprocessing
+              </label>
+              {preprocEnabled && (
+                <div className="mt-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-gray-600">Cloud mask:</label>
+                    <select
+                      value={cloudMaskMethod}
+                      onChange={(e) => setCloudMaskMethod(e.target.value as typeof cloudMaskMethod)}
+                      className="rounded border border-gray-300 px-2 py-0.5 text-xs"
+                    >
+                      <option value="scl">SCL (Sentinel-2)</option>
+                      <option value="qa_pixel">QA_PIXEL (Landsat)</option>
+                      <option value="s2cloudless">s2cloudless (ML)</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={speckleFilter}
+                      onChange={(e) => setSpeckleFilter(e.target.checked)}
+                      id="speckle"
+                    />
+                    <label htmlFor="speckle" className="text-xs text-gray-600">SAR speckle filter</label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-gray-600">Pan-sharpen:</label>
+                    <select
+                      value={typeof pansharpenAlgo === "string" ? pansharpenAlgo : "off"}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setPansharpenAlgo(v === "off" ? false : v as "brovey" | "pca" | "ihs")
+                      }}
+                      className="rounded border border-gray-300 px-2 py-0.5 text-xs"
+                    >
+                      <option value="off">Off</option>
+                      <option value="brovey">Brovey</option>
+                      <option value="pca">PCA</option>
+                      <option value="ihs">IHS</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+          </details>
+
           <div className="flex items-center gap-2">
             <label className="text-xs font-medium text-gray-600">Source:</label>
             <select
@@ -520,9 +598,14 @@ export default function ImageryModal({
             {fetchStatus === "idle" && (
               <span className="text-gray-400">Configure filters and click "Fetch Satellite Data"</span>
             )}
-            {fetchResult?.area_km2 && (
-              <span className="ml-2 text-gray-400">{fetchResult.area_km2.toFixed(2)} km²</span>
-            )}
+                {fetchResult?.preprocessing_applied && fetchResult.preprocessing_applied.length > 0 && (
+                  <span className="ml-2 text-purple-500">
+                    {" · "}preproc: {fetchResult.preprocessing_applied.join(", ")}
+                  </span>
+                )}
+                {fetchResult?.area_km2 && (
+                  <span className="ml-2 text-gray-400">{fetchResult.area_km2.toFixed(2)} km²</span>
+                )}
           </div>
 
           {/* Error action buttons */}
