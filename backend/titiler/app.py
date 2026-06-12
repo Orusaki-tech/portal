@@ -14,6 +14,7 @@ from fastapi.responses import Response
 from rasterio.errors import RasterioIOError
 from rio_tiler.errors import TileOutsideBounds
 from starlette.middleware.cors import CORSMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 from titiler.core.factory import TilerFactory
 
 sentry_sdk.init(
@@ -21,6 +22,22 @@ sentry_sdk.init(
     environment=os.getenv("APP_ENV", "development"),
     traces_sample_rate=0.1,
 )
+
+
+class CatchTileErrors:
+    """Middleware that catches TiTiler/rasterio errors and returns 204
+    instead of 500. Must be outermost so it wraps Sentry's middleware."""
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await self.app(scope, receive, send)
+        except (TileOutsideBounds, RasterioIOError):
+            from starlette.responses import Response as StarletteResponse
+            response = StarletteResponse(status_code=204)
+            await response(scope, receive, send)
+
 
 app = FastAPI(
     title="RealitySync Tile Server",
@@ -35,18 +52,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(CatchTileErrors)
+
 cog_tiler = TilerFactory()
 app.include_router(cog_tiler.router, prefix="/cog")
-
-
-@app.exception_handler(TileOutsideBounds)
-async def tile_outside_bounds(_request: Request, _exc: TileOutsideBounds) -> Response:
-    return Response(status_code=204)
-
-
-@app.exception_handler(RasterioIOError)
-async def rasterio_io_error(_request: Request, _exc: RasterioIOError) -> Response:
-    return Response(status_code=204)
 
 
 @app.get("/health")
