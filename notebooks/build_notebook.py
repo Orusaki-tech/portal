@@ -411,6 +411,34 @@ def process_admin2_region(region_name, polygon_geom, date_from="2017-01-01",
     df["component_centroid_lon"] = float(polygon_geom.centroid.x)
     print(f"  {region_name}: {len(df)} components")
     return df
+
+def visualize_region(region_name, polygon_geom, date_from="2017-01-01",
+                     date_to="2017-03-31", max_cloud=20,
+                     n_segments=40, target_pixels=(500, 500)):
+    \"\"\"Run pipeline and return (rgb, segments, indices) for plotting.\"\"\"
+    item = query_best_scene(polygon_geom, date_from, date_to, max_cloud)
+    if item is None:
+        return None, None, None, "no scene"
+    geojson_geom = json.loads(json.dumps(polygon_geom.__geo_interface__))
+    stack = read_msi_stack(item, geojson_geom, target_shape=target_pixels)
+    if stack is None:
+        return None, None, None, "no bands"
+    indices = compute_indices(stack)
+    # Build RGB from B04(R), B03(G), B02(B)
+    rgb = np.dstack([np.nan_to_num(stack[:,:,i]) for i in range(3)])
+    if rgb.max() > 0:
+        rgb = np.clip(rgb / np.percentile(rgb[rgb > 0], 98), 0, 1)
+    # Segment
+    bands_for_seg = []
+    for key in ["ndvi", "ndwi", "ndbi"]:
+        arr = indices.get(key)
+        if arr is not None:
+            lo, hi = np.nanquantile(arr, 0.02), np.nanquantile(arr, 0.98)
+            bands_for_seg.append(np.nan_to_num(np.clip((arr - lo) / (hi - lo + 1e-10), 0, 1)))
+    seg_input = np.dstack(bands_for_seg) if bands_for_seg else np.zeros((*rgb.shape[:2], 1))
+    segments = slic(seg_input, n_segments=n_segments, compactness=10,
+                    start_label=1, channel_axis=-1)
+    return rgb, segments, indices, "ok"
 """))
 
 # =========================================================================
@@ -594,7 +622,59 @@ print(admin2_scores.tail(10)[["adm2_name", "mean_similarity", "high_ratio"]].to_
 """))
 
 # =========================================================================
-# CELL 18: VALIDATE
+# CELL 18: VISUALIZE IMAGERY & SEGMENTS
+# =========================================================================
+cells.append(md("## 9. Visualize Sentinel-2 imagery with SLIC segments"))
+
+cells.append(code("""# Show imagery + SLIC overlay for the top-ranked test region and one crisis region
+import matplotlib.patches as mpatches
+
+def plot_region(region_name, polygon, ax_rgb, ax_ndvi, title_prefix):
+    rgb, seg, idx, status = visualize_region(region_name, polygon)
+    if status != "ok":
+        ax_rgb.text(0.5, 0.5, status, ha="center", va="center", transform=ax_rgb.transAxes)
+        ax_ndvi.axis("off")
+        return
+    # RGB composite with segment boundaries
+    ax_rgb.imshow(rgb)
+    seg_show = seg.copy().astype(float)
+    seg_show[seg_show == 0] = np.nan
+    # Draw boundaries via Sobel-like edge detection on segment labels
+    from skimage.filters import sobel
+    edges = sobel(seg.astype(float))
+    ax_rgb.imshow(edges > 0.01, cmap="gray", alpha=0.4, interpolation="nearest")
+    ax_rgb.set_title(f"{title_prefix}: {region_name}")
+    ax_rgb.axis("off")
+    # NDVI panel
+    ndvi = idx.get("ndvi")
+    if ndvi is not None:
+        im = ax_ndvi.imshow(ndvi, cmap="RdYlGn", vmin=-0.3, vmax=0.7)
+        plt.colorbar(im, ax=ax_ndvi, fraction=0.046, pad=0.04, label="NDVI")
+    ax_ndvi.set_title(f"{region_name} NDVI")
+    ax_ndvi.axis("off")
+
+# Pick top test region and one crisis region
+top_name = admin2_scores.iloc[0]["adm2_name"]
+crisis_name = crisis_admin2["adm2_name"].iloc[0] if len(crisis_admin2) > 0 else None
+
+fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+if crisis_name:
+    crisis_poly = crisis_admin2[crisis_admin2["adm2_name"] == crisis_name].iloc[0].geometry
+    plot_region(crisis_name, crisis_poly, axes[0,0], axes[0,1], "Crisis")
+# Find the matching polygon for the top test zone
+test_row = sampled_test[sampled_test["adm2_name"] == top_name]
+if len(test_row) > 0:
+    test_poly = test_row.iloc[0].geometry
+    plot_region(top_name, test_poly, axes[1,0], axes[1,1], "Top test")
+else:
+    axes[1,0].text(0.5, 0.5, f"{top_name} not in sampled_test", ha="center", va="center", transform=axes[1,0].transAxes)
+    axes[1,1].axis("off")
+plt.tight_layout()
+plt.show()
+"""))
+
+# =========================================================================
+# CELL 19: VALIDATE
 # =========================================================================
 cells.append(code("""# --- Validate against FEWS NET 2017 ground truth ---
 def _fetch_fews_2017():
