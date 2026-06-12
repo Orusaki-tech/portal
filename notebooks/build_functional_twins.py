@@ -225,15 +225,17 @@ else:
 cells.append(md("## 4. Process each Sentinel-2 scene from Planetary Computer"))
 cells.append(code("""BAND_NAMES = ["ndvi", "ndbi", "ndwi"]
 
-def _read_at_res(href, target_res_m):
+def _read_at_res(href, target_pixels=1000):
     with rasterio.open(href) as src:
-        native_res = abs(src.transform[0])
-        scale = target_res_m / native_res if native_res > 0 else 10
-        h = max(1, int(src.height / scale))
-        w = max(1, int(src.width / scale))
+        oh, ow = src.height, src.width
+        if oh >= ow:
+            h, w = target_pixels, max(1, int(ow * target_pixels / oh))
+        else:
+            w, h = target_pixels, max(1, int(oh * target_pixels / ow))
         data = src.read(out_shape=(1, h, w)).astype(np.float32)
-        new_tfm = src.transform * src.transform.scale(
-            src.width / w, src.height / h)
+        new_tfm = rasterio.transform.from_bounds(
+            src.bounds.left, src.bounds.bottom,
+            src.bounds.right, src.bounds.top, w, h)
         return data[0], new_tfm
 
 def process_stac_tile(item, admin_gdf, health_gdf, schools_gdf, roads_gdf, pop_src):
@@ -241,11 +243,11 @@ def process_stac_tile(item, admin_gdf, health_gdf, schools_gdf, roads_gdf, pop_s
     signed = sign(item)
     crs = item.properties.get("proj:epsg", 4326)
 
-    # Read bands at target resolution
-    b04, _ = _read_at_res(signed.assets["B04"].href, TARGET_RES_M)
-    b03, _ = _read_at_res(signed.assets["B03"].href, TARGET_RES_M)
-    b08, _ = _read_at_res(signed.assets["B08"].href, TARGET_RES_M)
-    b11, src_tfm = _read_at_res(signed.assets["B11"].href, TARGET_RES_M)
+    # Read bands at reduced resolution (~1000×1000)
+    b04, _ = _read_at_res(signed.assets["B04"].href)
+    b03, _ = _read_at_res(signed.assets["B03"].href)
+    b08, _ = _read_at_res(signed.assets["B08"].href)
+    b11, src_tfm = _read_at_res(signed.assets["B11"].href)
     s2 = np.dstack([np.nan_to_num(b04.astype(float)),
                     np.nan_to_num(b03.astype(float)),
                     np.nan_to_num(b08.astype(float)),
@@ -413,7 +415,14 @@ all_geo = []
 for idx, item in enumerate(items):
     item_id = item.id
     cc = item.properties.get("eo:cloud_cover", -1)
-    print(f"[{idx+1}/{len(items)}] {item_id} cloud={cc}%...", end=" ", flush=True)
+    bbox = item.bbox
+    cx, cy = (bbox[0]+bbox[2])/2, (bbox[1]+bbox[3])/2
+    print(f"[{idx+1}/{len(items)}] {item_id} cc={cc}% at ({cx:.1f},{cy:.1f})...", end=" ", flush=True)
+    # Check if near any city
+    for cname, cpt in CITIES.items():
+        if abs(cx - cpt.x) < 2 and abs(cy - cpt.y) < 2:
+            print(f"(covers {cname}) ", end="")
+            break
     try:
         df, geo = process_stac_tile(item, admin2, health_gdf, schools_gdf, roads_gdf, pop_src)
         all_components.append(df)
@@ -477,22 +486,34 @@ geo_map = comp_geo.set_index("component_id")["geometry"]
 clean_cids = components.loc[clean_idx, "component_id"].values
 clean_geoms = geo_map.loc[clean_cids]
 
+print(f"Clean components: {len(clean_geoms)} (total components: {len(components)})")
+print(f"Geo range: lon=[{clean_geoms.x.min():.2f}, {clean_geoms.x.max():.2f}], "
+      f"lat=[{clean_geoms.y.min():.2f}, {clean_geoms.y.max():.2f}]")
+
 is_reference = np.zeros(len(clean_geoms), dtype=bool)
 for city_name, city_pt in CITIES.items():
-    dists = clean_geoms.distance(city_pt)
-    mask = dists <= buffer_deg
+    dists = clean_geoms.distance(city_pt) * 111  # approximate km
+    mask = dists <= CITY_BUFFER_KM
     is_reference |= mask.values
     n = int(mask.sum())
     if n:
-        print(f"  {city_name}: {n} reference components")
+        print(f"  {city_name}: {n} reference components (within {CITY_BUFFER_KM} km)")
+    else:
+        print(f"  {city_name}: 0 in buffer (min distance = {dists.min():.1f} km)")
 
 ref_idx = np.where(is_reference)[0]
 print(f"Total reference components: {len(ref_idx)}")
 
 if len(ref_idx) < 3:
+    print(f"\\nSample component locations (first 10):")
+    for cid, geom in list(zip(clean_cids[:10], clean_geoms[:10])):
+        print(f"  comp {cid}: ({geom.x:.4f}, {geom.y:.4f})")
+    print(f"\\nCity locations:")
+    for cname, cpt in CITIES.items():
+        print(f"  {cname}: ({cpt.x:.4f}, {cpt.y:.4f})")
     raise RuntimeError(f"Too few reference components ({len(ref_idx)}). "
-                       f"The STAC query may not cover the city areas. "
-                       f"Try expanding the date range or cloud tolerance.")
+                       f"The scenes covering cities may have failed. "
+                       f"Check the STAC processing output above.")
 """))
 
 # =========================================================================
