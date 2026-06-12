@@ -21,15 +21,13 @@ steps:
     args:
       - -c
       - |
-        PN=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
-        FRONTEND_URL="https://realitysync-frontend-$${PN}.us-central1.run.app"
         gcloud run deploy realitysync-api \
           --image $_ARTIFACT_REGISTRY/realitysync-api:latest \
           --region $_REGION \
           --platform managed \
           --allow-unauthenticated \
           --add-cloudsql-instances $_CLOUD_SQL_INSTANCE \
-          --set-env-vars "^~^DB_HOST=/cloudsql/$_CLOUD_SQL_INSTANCE~DB_NAME=realitysync~APP_ENV=production~CORS_ORIGINS=http://localhost:3000,http://localhost:8080,$${FRONTEND_URL}" \
+          --set-env-vars "^~^DB_HOST=/cloudsql/$_CLOUD_SQL_INSTANCE~DB_NAME=realitysync~APP_ENV=production~CORS_ORIGINS=http://localhost:3000,http://localhost:8080" \
           --set-secrets "DB_USER=realitysync-db-user:latest,DB_PASSWORD=realitysync-db-password:latest" \
           --min-instances 0 \
           --max-instances 10 \
@@ -117,6 +115,21 @@ steps:
           --max-instances 10 \
           --timeout 5m
     waitFor: ["build-and-push-frontend"]
+
+  # ── 4. Update API CORS with the actual frontend URL ─────────────
+  - id: update-cors
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        FRONTEND_URL=$(gcloud run services describe realitysync-frontend \
+          --region $_REGION \
+          --format='value(status.url)')
+        gcloud run services update realitysync-api \
+          --region $_REGION \
+          --update-env-vars "^~^CORS_ORIGINS=http://localhost:3000,http://localhost:8080,$${FRONTEND_URL}"
+    waitFor: ["deploy-frontend"]
 
 substitutions:
   _REGION: us-central1
