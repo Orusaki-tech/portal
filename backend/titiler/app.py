@@ -9,8 +9,10 @@ which supports ``&geojson=...`` clipping natively.
 import os
 
 import sentry_sdk
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import Response
+from rasterio.errors import RasterioIOError
+from rio_tiler.errors import TileOutsideBounds
 from starlette.middleware.cors import CORSMiddleware
 from titiler.core.factory import TilerFactory
 
@@ -35,6 +37,16 @@ app.add_middleware(
 
 cog_tiler = TilerFactory()
 app.include_router(cog_tiler.router, prefix="/cog")
+
+
+@app.exception_handler(TileOutsideBounds)
+async def tile_outside_bounds(_request: Request, _exc: TileOutsideBounds) -> Response:
+    return Response(status_code=204)
+
+
+@app.exception_handler(RasterioIOError)
+async def rasterio_io_error(_request: Request, _exc: RasterioIOError) -> Response:
+    return Response(status_code=204)
 
 
 @app.get("/health")
