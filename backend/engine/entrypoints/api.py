@@ -1835,12 +1835,57 @@ class ImageryFetchRequest(BaseModel):
     date_from: str | None = None
     date_to: str | None = None
     max_cloud_cover: float = Field(default=0, ge=0, le=100)
-    mosaic: bool = True
     api_key: str | None = None
     preprocessing: dict[str, Any] | None = None
     """User-specified preprocessing overrides. Structure: {step_name: {option: value}}.
        Empty dict or null uses source defaults. Example:
        {"cloud_mask": {"method": "scl"}, "speckle_filter": {"window_size": 5}}"""
+
+
+class ImageryCoverageRequest(BaseModel):
+    source_id: str = Field(min_length=1)
+    geojson: dict[str, Any]
+    buffer_meters: int = 0
+    date_from: str | None = None
+    date_to: str | None = None
+    max_cloud_cover: float = Field(default=0, ge=0, le=100)
+
+
+@app.post("/api/imagery/coverage")
+async def imagery_coverage(body: ImageryCoverageRequest, request: Request) -> Any:
+    """Return the number of scenes and the footprint-coverage percentage
+    for a polygon **without** triggering any COG generation or background
+    processing.
+
+    This is a pure query — no credits are consumed and no cached COG is
+    produced.  Use this endpoint to let users preview data availability
+    before committing to the full ``/api/imagery/fetch`` pipeline.
+    """
+    from backend.engine.service_layer.cog_service import (
+        get_coverage_estimate,
+    )
+    from backend.engine.service_layer.exceptions import (
+        NoScenesFoundError,
+        SatellitePipelineError,
+    )
+
+    try:
+        result = get_coverage_estimate(
+            source_id=body.source_id,
+            geojson=body.geojson,
+            buffer_meters=body.buffer_meters,
+            date_from=body.date_from,
+            date_to=body.date_to,
+            max_cloud_cover=body.max_cloud_cover,
+        )
+        return result
+    except NoScenesFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="No satellite imagery found for this area with the current filters.",
+        )
+    except SatellitePipelineError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
 
 
 @app.post("/api/imagery/fetch")

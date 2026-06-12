@@ -234,8 +234,20 @@ export interface ImageryFetchRequest {
   date_from?: string
   date_to?: string
   max_cloud_cover: number
-  mosaic: boolean
-  preprocessing?: PreprocessingOptions
+  preprocessing?: Record<string, unknown>
+}
+
+export interface ImageryCoverageResponse {
+  preview_available: boolean
+  scene_count: number
+  scene_ids: string[]
+  coverage_pct: number | null
+  datetime_from: string | null
+  datetime_to: string | null
+  cloud_cover_avg: number | null
+  resolution: number | null
+  area_km2: number | null
+  source_type: string
 }
 
 export type FetchStatus = "idle" | "previewing" | "processing" | "ready" | "error"

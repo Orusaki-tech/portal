@@ -656,6 +656,62 @@ def _query_stac_scenes(
     return scenes
 
 
+def get_coverage_estimate(
+    source_id: str,
+    geojson: dict,
+    buffer_meters: int = 0,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    max_cloud_cover: float = 100,
+) -> dict[str, Any]:
+    """Query STAC for scenes matching the polygon and return coverage
+    statistics without triggering any COG generation or background job.
+
+    Returns the same scene metadata as ``get_preview_scene`` but also
+    includes a ``coverage_pct`` field computed from the union of scene
+    footprints.  Raises ``NoScenesFoundError`` when no scenes match the
+    given filters.
+    """
+    source_type = _get_source_type(source_id)
+    if source_type != "stac":
+        return {
+            "preview_available": False,
+            "scene_count": 0,
+            "coverage_pct": 0,
+        }
+
+    scenes = _query_stac_scenes(
+        source_id, geojson, buffer_meters,
+        date_from, date_to, max_cloud_cover,
+    )
+    if not scenes:
+        from backend.engine.service_layer.exceptions import NoScenesFoundError
+        raise NoScenesFoundError()
+
+    poly = shape(geojson)
+    if buffer_meters > 0:
+        poly = poly.buffer(buffer_meters / 111_320.0)
+    target_area = compute_geojson_area(geojson, buffer_meters)
+
+    _, coverage_pct = _check_scene_coverage(scenes, poly)
+
+    dates = [s.datetime for s in scenes if s.datetime]
+    cloud_covers = [s.cloud_cover for s in scenes if s.cloud_cover is not None]
+
+    return {
+        "preview_available": True,
+        "scene_count": len(scenes),
+        "scene_ids": [s.id for s in scenes],
+        "coverage_pct": round(coverage_pct, 1) if coverage_pct is not None else None,
+        "datetime_from": min(dates) if dates else None,
+        "datetime_to": max(dates) if dates else None,
+        "cloud_cover_avg": round(sum(cloud_covers) / len(cloud_covers), 1) if cloud_covers else None,
+        "resolution": getattr(scenes[0], "resolution", None),
+        "area_km2": target_area,
+        "source_type": source_type,
+    }
+
+
 def _check_scene_coverage(scenes: list[Scene], target_poly) -> tuple[bool, float | None]:
     if not scenes:
         return False, None

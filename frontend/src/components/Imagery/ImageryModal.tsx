@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import maplibregl from "maplibre-gl"
 import "maplibre-gl/dist/maplibre-gl.css"
 import * as turf from "@turf/turf"
-import type { ImagerySource, AdminLevel, FetchStatus, ImageryFetchResponse, PreprocessingOptions } from "@/types/polygon"
+import type { ImagerySource, AdminLevel, FetchStatus, ImageryFetchResponse, ImageryCoverageResponse, PreprocessingOptions } from "@/types/polygon"
 
 interface ImageryModalProps {
   open: boolean
@@ -103,12 +103,17 @@ export default function ImageryModal({
     pansharpen: pansharpenAlgo,
   }
 
+  // Coverage estimate (separate from fetch — no COG generation)
+  const [coverage, setCoverage] = useState<ImageryCoverageResponse | null>(null)
+  const [coverageLoading, setCoverageLoading] = useState(false)
+
   // Two-phase pipeline state
   const [fetchStatus, setFetchStatus] = useState<FetchStatus>("idle")
   const [fetchResult, setFetchResult] = useState<ImageryFetchResponse | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const coverageDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Map state
   const mapContainer = useRef<HTMLDivElement>(null)
@@ -138,11 +143,14 @@ export default function ImageryModal({
     return region ? computeBbox(region) : [37, -4, 38, 4]
   }, [region])
 
-  // TiTiler tile URLs
+  // TiTiler tile URLs — suppress partial preview for large/low-coverage areas
   const previewTileUrl = useMemo(() => {
     if (fetchStatus !== "previewing" || !fetchResult?.preview_url || !region?.geometry) return null
+    const coverageOk = coverage && coverage.coverage_pct !== null && coverage.coverage_pct >= 80
+    const areaOk = coverage && coverage.area_km2 !== null && coverage.area_km2 <= 1000
+    if (!coverageOk && !areaOk) return null
     return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.preview_url)}&geojson=${encodeURIComponent(JSON.stringify(region.geometry))}`
-  }, [fetchStatus, fetchResult, region])
+  }, [fetchStatus, fetchResult, region, coverage])
 
   const cogTileUrl = useMemo(() => {
     if (fetchStatus !== "ready" || !fetchResult?.cog_url) return null
@@ -158,6 +166,41 @@ export default function ImageryModal({
     }
   }, [])
 
+  // Check coverage (no COG generation — pure query)
+  const handleCheckCoverage = useCallback(async () => {
+    if (!feature?.geometry) return
+    setCoverageLoading(true)
+    try {
+      const res = await fetchApi<ImageryCoverageResponse>("/api/imagery/coverage", {
+        source_id: activeSourceId,
+        geojson: feature.geometry,
+        buffer_meters: buffer,
+        date_from: dateFrom,
+        date_to: dateTo,
+        max_cloud_cover: maxCloudCover,
+      })
+      setCoverage(res)
+    } catch {
+      setCoverage(null)
+    } finally {
+      setCoverageLoading(false)
+    }
+  }, [feature, activeSourceId, buffer, dateFrom, dateTo, maxCloudCover])
+
+  // Auto-check coverage on modal open (immediate) and filter changes (debounced)
+  useEffect(() => {
+    if (!open) return
+    if (coverageDebounceRef.current) clearTimeout(coverageDebounceRef.current)
+    coverageDebounceRef.current = setTimeout(() => {
+      handleCheckCoverage()
+    }, coverage ? 600 : 0)
+    return () => {
+      if (coverageDebounceRef.current) clearTimeout(coverageDebounceRef.current)
+    }
+    // Only re-run when filters change or modal opens
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, activeSourceId, buffer, dateFrom, dateTo, maxCloudCover])
+
   // Submit fetch request
   const handleFetch = useCallback(async () => {
     if (!feature?.geometry) return
@@ -166,11 +209,12 @@ export default function ImageryModal({
     setFetchResult(null)
 
     try {
-      const pp = preprocEnabled ? {
-        cloud_mask_method: cloudMaskMethod,
-        speckle_filter: speckleFilter,
-        pansharpen: pansharpenAlgo,
-      } : null
+      const pp: Record<string, unknown> | null = preprocEnabled ? {} : null
+      if (preprocEnabled) {
+        pp!["cloud_mask"] = { method: cloudMaskMethod }
+        if (speckleFilter) pp!["speckle_filter"] = {}
+        if (pansharpenAlgo) pp!["pansharpen"] = { algorithm: pansharpenAlgo }
+      }
 
       const res = await fetchApi<ImageryFetchResponse>("/api/imagery/fetch", {
         source_id: activeSourceId,
@@ -179,7 +223,6 @@ export default function ImageryModal({
         date_from: dateFrom,
         date_to: dateTo,
         max_cloud_cover: maxCloudCover,
-        mosaic: true,
         preprocessing: pp,
       })
 
@@ -210,7 +253,7 @@ export default function ImageryModal({
             } catch {
               // poll continues silently
             }
-          }, 2000)
+          }, 5000)
         }
       } else if (res.status === "processing") {
         setFetchResult(res)
@@ -240,7 +283,7 @@ export default function ImageryModal({
             } catch {
               // poll continues silently
             }
-          }, 2000)
+          }, 5000)
         }
       } else {
         throw new Error("Unexpected response status")
@@ -251,20 +294,14 @@ export default function ImageryModal({
     }
   }, [feature, activeSourceId, buffer, dateFrom, dateTo, maxCloudCover, preprocEnabled, cloudMaskMethod, speckleFilter, pansharpenAlgo])
 
-  // Cancel polling and reset
+  // Cancel polling and reset (preserves filter values across open/close)
   const resetState = useCallback(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current)
       pollRef.current = null
     }
-    setBuffer(0)
-    setDateFrom(threeMonthsAgo())
-    setDateTo(todayISO())
-    setMaxCloudCover(0)
-    setPreprocEnabled(true)
-    setCloudMaskMethod("scl")
-    setSpeckleFilter(true)
-    setPansharpenAlgo(false)
+    setCoverage(null)
+    setCoverageLoading(false)
     setFetchStatus("idle")
     setFetchResult(null)
     setFetchError(null)
@@ -417,6 +454,8 @@ export default function ImageryModal({
   // Source change resets fetch
   const handleSourceChange = useCallback((newId: string) => {
     setActiveSourceId(newId)
+    setCoverage(null)
+    setCoverageLoading(false)
     setFetchStatus("idle")
     setFetchResult(null)
     setFetchError(null)
@@ -564,12 +603,53 @@ export default function ImageryModal({
             </select>
           </div>
 
+          {/* Coverage estimate section — always visible */}
+          <div className="flex items-center gap-2">
+            {coverageLoading && !coverage ? (
+              <span className="text-xs text-gray-400">Checking coverage...</span>
+            ) : coverage ? (
+              <div className="flex items-center gap-2 text-xs">
+                <span className={
+                  coverage.coverage_pct !== null
+                    ? coverage.coverage_pct >= 80
+                      ? "text-green-600"
+                      : coverage.coverage_pct >= 50
+                        ? "text-amber-600"
+                        : "text-red-600"
+                    : "text-gray-400"
+                }>
+                  {coverage.scene_count} scene{coverage.scene_count !== 1 ? "s" : ""}
+                  {coverage.coverage_pct !== null && <> · {coverage.coverage_pct}% coverage</>}
+                </span>
+                {coverage.cloud_cover_avg !== null && (
+                  <span className="text-gray-400">· {coverage.cloud_cover_avg}% cloud avg</span>
+                )}
+                {coverage.datetime_from && (
+                  <span className="text-gray-400">
+                    · {coverage.datetime_from.slice(0, 10)}
+                    {coverage.datetime_to && coverage.datetime_to !== coverage.datetime_from && <> to {coverage.datetime_to.slice(0, 10)}</>}
+                  </span>
+                )}
+                {coverage.area_km2 && (
+                  <span className="text-gray-400">· {coverage.area_km2.toFixed(2)} km²</span>
+                )}
+              </div>
+            ) : null}
+            <button
+              onClick={handleCheckCoverage}
+              disabled={coverageLoading}
+              className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {coverageLoading ? "..." : "Refresh estimate"}
+            </button>
+          </div>
+
           <button
             onClick={handleFetch}
             disabled={btnDisabled}
             className="rounded bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {btnDisabled ? "Fetching..." : "Fetch Satellite Data"}
+            {fetchStatus === "previewing" || fetchStatus === "processing" ? "Fetching..." : "Fetch Satellite Data"}
           </button>
         </div>
 
@@ -577,106 +657,25 @@ export default function ImageryModal({
         <div className="flex items-center justify-between border-b px-6 py-1.5">
           <div className="flex items-center gap-3 text-xs">
             {fetchStatus === "previewing" && (
-              <span className="text-blue-600">Preview loaded — generating clipped COG...</span>
+              <span className="text-blue-600">
+                {fetchResult?.preview_url && !previewTileUrl
+                  ? "Coverage is low — building cloud-masked mosaic instead of preview..."
+                  : fetchResult?.preview_url
+                    ? "Preview loaded — generating clipped COG..."
+                    : "Fetching images — building cloud-masked mosaic..."}
+              </span>
             )}
             {fetchStatus === "processing" && (
-              <span className="text-amber-600">Processing satellite data...</span>
+              <span className="text-amber-600">Processing satellite imagery...</span>
             )}
             {fetchStatus === "ready" && (
               <span className="text-green-600">
                 {fetchResult?.cached ? "Cached" : "Ready"}
-                {fetchResult?.scene_count && <> &middot; {fetchResult.scene_count} scene{fetchResult.scene_count > 1 ? "s" : ""}</>}
+                {fetchResult?.scene_count !== undefined && fetchResult.scene_count > 0 && <> &middot; {fetchResult.scene_count} scene{fetchResult.scene_count > 1 ? "s" : ""}</>}
                 {fetchResult?.cloud_cover_avg !== undefined && <> &middot; {fetchResult.cloud_cover_avg}% cloud avg</>}
                 {fetchResult?.datetime_from && <> &middot; {fetchResult.datetime_from.slice(0, 10)}</>}
                 {fetchResult?.datetime_to && fetchResult.datetime_to !== fetchResult.datetime_from && <> to {fetchResult.datetime_to.slice(0, 10)}</>}
-                {fetchResult?.resolution && <> &middot; {fetchResult.resolution}m</>}
-              </span>
-            )}
-            {fetchStatus === "error" && (
-              <span className="text-red-600">{fetchError || "Failed to load imagery"}</span>
-            )}
-            {fetchStatus === "idle" && (
-              <span className="text-gray-400">Configure filters and click "Fetch Satellite Data"</span>
-            )}
-                {fetchResult?.preprocessing_applied && fetchResult.preprocessing_applied.length > 0 && (
-                  <span className="ml-2 text-purple-500">
-                    {" · "}preproc: {fetchResult.preprocessing_applied.join(", ")}
-                  </span>
-                )}
-                {fetchResult?.area_km2 && (
-                  <span className="ml-2 text-gray-400">{fetchResult.area_km2.toFixed(2)} km²</span>
-                )}
-          </div>
+                {fetchResult?.resolution !== undefined && fetchResult.resolution > 0 && <> &middot; {fetchResult.resolution}m</>}
 
-          {/* Error action buttons */}
-          {fetchStatus === "error" && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setMaxCloudCover((c) => Math.min(100, c + 25))}
-                className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
-              >
-                Raise cloud cover
-              </button>
-              <button
-                onClick={() => {
-                  setDateFrom(threeMonthsAgo())
-                  setDateTo(todayISO())
-                }}
-                className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
-              >
-                Expand dates
-              </button>
-              <button
-                onClick={handleFetch}
-                className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800 hover:bg-blue-200"
-              >
-                Retry
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Map */}
-        <div className="flex-1">
-          <div ref={mapContainer} className="h-full w-full" />
-        </div>
-
-        {/* Footer — export */}
-        <div className="flex items-center justify-between border-t px-6 py-3">
-          <div className="text-xs text-gray-400">
-            {fetchStatus === "ready" && fetchResult?.scene_ids && fetchResult.scene_ids.length > 0 && (
-              <span title={fetchResult.scene_ids.join(", ")}>
-                Scene{fetchResult.scene_ids.length > 1 ? "s" : ""}: {fetchResult.scene_ids.slice(0, 3).join(", ")}
-                {fetchResult.scene_ids.length > 3 && ` +${fetchResult.scene_ids.length - 3} more`}
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {fetchStatus === "ready" && fetchResult?.cog_url && (
-              <button
-                onClick={downloadGeoTiff}
-                disabled={downloading !== null}
-                className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {downloading === "tif" ? "Downloading..." : "GeoTIFF"}
-              </button>
-            )}
-            <button
-              onClick={() => exportFromMap("png")}
-              className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
-            >
-              PNG
-            </button>
-            <button
-              onClick={() => exportFromMap("jpg")}
-              className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
-            >
-              JPEG
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+              )
 }
