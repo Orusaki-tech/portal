@@ -83,8 +83,14 @@ warnings.filterwarnings("ignore")
 np.set_printoptions(precision=3, suppress=True)
 pd.set_option("display.max_columns", 20)
 
-PROJECT_ROOT = Path(os.path.abspath("")).resolve()
+_cwd = Path(os.path.abspath("")).resolve()
+# Try parent dir if ken_admin2.geojson is there (codespace root)
+if (_cwd.parent / "ken_admin2.geojson").exists():
+    PROJECT_ROOT = _cwd.parent
+else:
+    PROJECT_ROOT = _cwd
 print(f"Project root: {PROJECT_ROOT}")
+print(f"Admin path:  {PROJECT_ROOT / 'ken_admin2.geojson'} exists={(PROJECT_ROOT / 'ken_admin2.geojson').exists()}")
 """))
 
 # =========================================================================
