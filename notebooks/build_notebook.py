@@ -2,17 +2,21 @@
 """Build the complete semantic similarity notebook for Kenya crisis detection."""
 import json, os
 
+def _lines(src):
+    parts = src.split("\n")
+    return [p + "\n" for p in parts]
+
 def md(src):
     return {"cell_type": "markdown",
             "metadata": {},
-            "source": src.split("\n")}
+            "source": _lines(src)}
 
 def code(src):
     return {"cell_type": "code",
             "metadata": {},
             "execution_count": None,
             "outputs": [],
-            "source": src.split("\n")}
+            "source": _lines(src)}
 
 cells = []
 
