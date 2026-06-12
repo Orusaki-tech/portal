@@ -74,7 +74,7 @@ After the export finishes, download `kenya_mosaic_100m.tif` and place it in the 
 # =========================================================================
 cells.append(md("## 1. Install dependencies"))
 cells.append(code("""import subprocess, sys
-req = ["geopandas", "rasterio", "scikit-image", "scikit-learn",
+req = ["geopandas", "pyarrow", "rasterio", "scikit-image", "scikit-learn",
        "matplotlib", "pandas", "numpy", "requests", "shapely"]
 for p in req:
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", p])
@@ -167,35 +167,49 @@ def _download(url, dest, label=""):
         return None
     return str(dest)
 
-def _unzip_to_dir(zip_path, extract_dir):
-    import zipfile
-    extract_dir = Path(extract_dir)
-    extract_dir.mkdir(parents=True, exist_ok=True)
-    if any(extract_dir.iterdir()):
-        return str(extract_dir)
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(extract_dir)
-    return str(extract_dir)
+def _ensure_parquet(zip_url, zip_name, parquet_name, label=""):
+    # Download ZIP, extract, convert to GeoParquet. Subsequent runs load parquet directly.
+    parquet_path = VECTOR_DIR / parquet_name
+    if parquet_path.exists():
+        mb = parquet_path.stat().st_size / 1e6
+        print(f"  {label or parquet_name}: loaded from parquet ({mb:.0f} MB)")
+        return str(parquet_path)
 
-# --- Health facilities (OSM / HDX) ---
-health_url = ("https://s3.dualstack.us-east-1.amazonaws.com/production-raw-data-api/"
-              "ISO3/KEN/health_facilities/points/"
-              "hotosm_ken_health_facilities_points_geojson.zip")
-health_zip = _download(health_url, VECTOR_DIR / "health_facilities.zip", "Health facilities")
-health_dir = _unzip_to_dir(health_zip, VECTOR_DIR / "health_facilities") if health_zip else None
+    zip_path = VECTOR_DIR / zip_name
+    if not zip_path.exists():
+        _download(zip_url, zip_path, label)
+        if not zip_path.exists():
+            return None
 
-# --- Schools (OSM / HDX) ---
-schools_url = ("https://s3.dualstack.us-east-1.amazonaws.com/production-raw-data-api/"
-               "ISO3/KEN/education_facilities/points/"
-               "hotosm_ken_education_facilities_points_geojson.zip")
-schools_zip = _download(schools_url, VECTOR_DIR / "schools.zip", "Schools")
-schools_dir = _unzip_to_dir(schools_zip, VECTOR_DIR / "schools") if schools_zip else None
+    import zipfile, tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(tmp)
+        gdf = gpd.read_file(tmp)
+        if gdf.crs is None:
+            gdf.set_crs("EPSG:4326", inplace=True)
+        gdf.to_parquet(parquet_path)
+    mb = parquet_path.stat().st_size / 1e6
+    print(f"  {label}: converted to GeoParquet ({mb:.0f} MB)")
+    return str(parquet_path)
 
-# --- Roads (HDX) ---
-roads_url = ("https://data.humdata.org/dataset/3d10cb5f-f56e-4924-b1fd-32931e0ddb41/"
-             "resource/0170d6b6-7ad3-439a-ae1e-e84060886502/download/kenroads.zip")
-roads_zip = _download(roads_url, VECTOR_DIR / "roads.zip", "Roads")
-roads_dir = _unzip_to_dir(roads_zip, VECTOR_DIR / "roads") if roads_zip else None
+# --- Health facilities ---
+health_path = _ensure_parquet(
+    "https://s3.dualstack.us-east-1.amazonaws.com/production-raw-data-api/"
+    "ISO3/KEN/health_facilities/points/hotosm_ken_health_facilities_points_geojson.zip",
+    "health_facilities.zip", "health_facilities.parquet", "Health facilities")
+
+# --- Schools ---
+schools_path = _ensure_parquet(
+    "https://s3.dualstack.us-east-1.amazonaws.com/production-raw-data-api/"
+    "ISO3/KEN/education_facilities/points/hotosm_ken_education_facilities_points_geojson.zip",
+    "schools.zip", "schools.parquet", "Schools")
+
+# --- Roads ---
+roads_path = _ensure_parquet(
+    "https://data.humdata.org/dataset/3d10cb5f-f56e-4924-b1fd-32931e0ddb41/"
+    "resource/0170d6b6-7ad3-439a-ae1e-e84060886502/download/kenroads.zip",
+    "roads.zip", "roads.parquet", "Roads")
 """))
 
 # =========================================================================
@@ -369,26 +383,23 @@ print(f"Pop density attached: {np.isfinite(pop_vals).sum()} / {len(pop_vals)} ha
 # =========================================================================
 # CELL 12: SPATIAL JOIN — HEALTH FACILITIES
 # =========================================================================
-cells.append(code("""def _load_osm_dir(dir_path):
-    if not dir_path or not os.path.isdir(dir_path):
+cells.append(code("""def _load_parquet(path):
+    if not path or not os.path.exists(path):
         return None
-    for f in os.listdir(dir_path):
-        if f.endswith(".geojson"):
-            return gpd.read_file(os.path.join(dir_path, f))
-    # Fallback: try reading the directory as a shapefile
-    shp_files = [f for f in os.listdir(dir_path) if f.endswith(".shp")]
-    if shp_files:
-        return gpd.read_file(os.path.join(dir_path, shp_files[0]))
-    return None
+    try:
+        return gpd.read_parquet(path)
+    except Exception as e:
+        print(f"  WARNING: failed to load {path}: {e}")
+        return None
 
-def count_nearby(points_gdf, data_dir, buffer_km=5, col_name="features"):
+def count_nearby(points_gdf, parquet_path, buffer_km=5, col_name="features"):
     counts = np.zeros(len(points_gdf), dtype=int)
-    feats = _load_osm_dir(data_dir)
+    feats = _load_parquet(parquet_path)
     if feats is None or len(feats) == 0:
         print(f"  {col_name}: no data loaded")
         return counts
     try:
-        if feats.crs is None or feats.crs != "EPSG:4326":
+        if feats.crs is None:
             feats.set_crs("EPSG:4326", inplace=True)
         feats_sindex = feats.sindex
         buffer_deg = buffer_km / 111.0
@@ -405,21 +416,21 @@ def count_nearby(points_gdf, data_dir, buffer_km=5, col_name="features"):
         print(f"  {col_name}: FAILED ({e})")
     return counts
 
-comp_geo["health_facilities"] = count_nearby(comp_geo, health_dir, FEATURE_BUFFER_KM, "Health facilities")
+comp_geo["health_facilities"] = count_nearby(comp_geo, health_path, FEATURE_BUFFER_KM, "Health facilities")
 """))
 
 # =========================================================================
 # CELL 13: SPATIAL JOIN — SCHOOLS
 # =========================================================================
-cells.append(code("""comp_geo["schools"] = count_nearby(comp_geo, schools_dir, FEATURE_BUFFER_KM, "Schools")
+cells.append(code("""comp_geo["schools"] = count_nearby(comp_geo, schools_path, FEATURE_BUFFER_KM, "Schools")
 """))
 
 # =========================================================================
 # CELL 14: ROAD DENSITY
 # =========================================================================
-cells.append(code("""def road_density(points_gdf, road_dir, buffer_km=2):
+cells.append(code("""def road_density(points_gdf, parquet_path, buffer_km=2):
     densities = np.zeros(len(points_gdf))
-    roads = _load_osm_dir(road_dir)
+    roads = _load_parquet(parquet_path)
     if roads is None or len(roads) == 0:
         print("  SKIP: roads not available")
         return densities
@@ -445,7 +456,7 @@ cells.append(code("""def road_density(points_gdf, road_dir, buffer_km=2):
         print(f"  Road density FAILED: {e}")
     return densities
 
-comp_geo["road_density"] = road_density(comp_geo, roads_dir, buffer_km=2)
+comp_geo["road_density"] = road_density(comp_geo, roads_path, buffer_km=2)
 """))
 
 # =========================================================================
