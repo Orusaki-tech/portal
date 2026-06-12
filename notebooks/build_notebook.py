@@ -101,8 +101,7 @@ from pystac_client import Client as StacClient
 from planetary_computer import sign_url
 import httpx
 
-from rio_tiler.io import COGReader as Reader
-from rio_tiler.errors import TileOutsideBounds
+
 
 from skimage.segmentation import slic
 from skimage.measure import regionprops_table
@@ -288,38 +287,49 @@ def get_band_url(item, band):
     asset = item.assets.get(band)
     return asset.href if asset else None
 
-def read_band_clipped(band_url, geojson_geom, target_shape=None):
+def _read_band(band_url, bounds, out_shape):
+    # Read a band within bounds at target shape using COG overviews
     try:
-        band_url = sign_url(band_url)
+        signed = sign_url(band_url)
     except Exception:
-        pass
-    with Reader(band_url) as reader:
-        img = reader.feature(geojson_geom)
-        data, mask = img.data[0], img.mask
-    if target_shape and data.shape != target_shape:
-        data = resize(data, target_shape, preserve_range=True, anti_aliasing=True)
-        mask = resize(mask.astype(float), target_shape, preserve_range=True, anti_aliasing=True) > 0.5
+        signed = band_url
+    with rasterio.open(signed) as src:
+        overviews = src.overviews(1)
+        if overviews:
+            ovr = min(overviews, key=lambda o: max(1, src.width // o - out_shape[1]))
+            window = src.window(*bounds)
+            window = window.round_offsets().round_lengths()
+            data = src.read(1, window=window, out_shape=out_shape)
+            mask = src.dataset_mask(window=window, out_shape=out_shape)
+        else:
+            window = src.window(*bounds)
+            window = window.round_offsets().round_lengths()
+            data = src.read(1, window=window, out_shape=out_shape)
+            mask = src.dataset_mask(window=window, out_shape=out_shape)
     return data, mask
 
 def read_msi_stack(item, geojson_geom, target_shape=(500, 500)):
+    # Read all bands clipped to geometry, resampled to target_shape
+    geom = shape(geojson_geom)
+    bounds = geom.bounds  # (minx, miny, maxx, maxy)
     bands = {}
-    first_shape = None
+    first = None
     for bk in BAND_KEYS:
         url = get_band_url(item, bk)
         if not url:
             print(f"  WARNING: Band {bk} not available")
             continue
         try:
-            data, mask = read_band_clipped(url, geojson_geom, target_shape=target_shape)
-            data = np.where(mask == 0, np.nan, data)
+            data, mask = _read_band(url, bounds, target_shape)
+            data = np.where(mask == 0, np.nan, data.astype(float))
             bands[bk] = data
-            if first_shape is None:
-                first_shape = data.shape
+            if first is None:
+                first = data.shape
         except Exception as e:
             print(f"  ERROR reading {bk}: {e}")
             continue
-    if "B11" in bands and first_shape and bands["B11"].shape != first_shape:
-        bands["B11"] = resize(bands["B11"], first_shape, preserve_range=True, anti_aliasing=True)
+    if "B11" in bands and first and bands["B11"].shape != first:
+        bands["B11"] = resize(bands["B11"], first, preserve_range=True, anti_aliasing=True)
     if not bands:
         return None
     ordered = [bands[bk] for bk in BAND_KEYS if bk in bands]
