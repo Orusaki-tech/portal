@@ -151,19 +151,23 @@ export default function ImageryModal({
     return region ? computeBbox(region) : [37, -4, 38, 4]
   }, [region])
 
-  // TiTiler tile URLs — avoid geojson clip in URL; use MapLibre source.mask instead
+  const geojsonParam = useMemo(() => {
+    if (!region?.geometry) return ""
+    return "&geojson=" + encodeURIComponent(JSON.stringify(region.geometry))
+  }, [region])
+
   const previewTileUrl = useMemo(() => {
     if (fetchStatus !== "previewing" || !fetchResult?.preview_url || !region?.geometry) return null
     const coverageOk = coverage && coverage.coverage_pct !== null && coverage.coverage_pct >= 80
     const areaOk = coverage && coverage.area_km2 !== null && coverage.area_km2 <= 1000
     if (!coverageOk && !areaOk) return null
-    return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.preview_url)}`
-  }, [fetchStatus, fetchResult, region, coverage])
+    return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.preview_url)}${geojsonParam}`
+  }, [fetchStatus, fetchResult, region, coverage, geojsonParam])
 
   const cogTileUrl = useMemo(() => {
     if (fetchStatus !== "ready" || !fetchResult?.cog_url) return null
-    return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.cog_url)}`
-  }, [fetchStatus, fetchResult])
+    return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.cog_url)}${geojsonParam}`
+  }, [fetchStatus, fetchResult, geojsonParam])
 
   const activeTileUrl = cogTileUrl || previewTileUrl
 

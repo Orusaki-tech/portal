@@ -780,6 +780,11 @@ def _generate_clipped_cog(
 
     output_path = os.path.join(tmpdir, "clipped_cog.tif")
 
+    logger.info(
+        "Clipping COG: input=%s cutline=%s poly_area_km2=%.2f buffer_m=%d",
+        input_path, cutline_path, poly.area * 111_320**2, buffer_meters,
+    )
+
     cmd = [
         "gdalwarp", input_path, output_path,
         "-of", "COG",
@@ -796,6 +801,7 @@ def _generate_clipped_cog(
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=300)
     except (subprocess.CalledProcessError, FileNotFoundError):
+        logger.warning("Direct COG output failed, falling back to warp+translate")
         warped_path = os.path.join(tmpdir, "warped.tif")
         subprocess.run([
             "gdalwarp", input_path, warped_path,
@@ -813,6 +819,22 @@ def _generate_clipped_cog(
             "-co", "BLOCKSIZE=512",
             "-co", "RESAMPLING=LANCZOS",
         ], check=True, capture_output=True, timeout=300)
+
+    from osgeo import gdal
+    src_ds = gdal.Open(output_path, gdal.GA_ReadOnly)
+    if src_ds:
+        gt = src_ds.GetGeoTransform()
+        width = src_ds.RasterXSize
+        height = src_ds.RasterYSize
+        bounds = (
+            gt[0], gt[3] + height * gt[5],
+            gt[0] + width * gt[1], gt[3],
+        )
+        logger.info(
+            "COG clip result: width=%d height=%d bounds=%s size_bytes=%d",
+            width, height, bounds, os.path.getsize(output_path),
+        )
+        src_ds = None
 
     size_bytes = os.path.getsize(output_path)
     return output_path, size_bytes
