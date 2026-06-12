@@ -158,11 +158,21 @@ def _ensure_parquet(zip_url, zip_name, parquet_name, label=""):
         if not zip_path.exists():
             return None
 
-    import zipfile, tempfile
+    import zipfile, tempfile, glob
     with tempfile.TemporaryDirectory() as tmp:
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(tmp)
-        gdf = gpd.read_file(tmp)
+        # Find the first vector file in the extracted directory
+        files = os.listdir(tmp)
+        vec_file = None
+        for f in files:
+            if f.endswith((".geojson", ".shp", ".gpkg")):
+                vec_file = os.path.join(tmp, f)
+                break
+        if vec_file is None:
+            print(f"  {label}: no vector file found in ZIP ({files})")
+            return None
+        gdf = gpd.read_file(vec_file)
         if gdf.crs is None:
             gdf.set_crs("EPSG:4326", inplace=True)
         gdf.to_parquet(parquet_path)
