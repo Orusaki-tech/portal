@@ -120,7 +120,6 @@ FEATURE_BUFFER_KM = 5      # for health facilities and schools
 
 print(f"Reference cities: {list(CITIES.keys())}")
 print(f"Mosaic: STAC query in Kenya bbox, {DATE_RANGE}, cloud < {MAX_CLOUD}%")
-print(f"Target resolution: {TARGET_RES_M} m")
 print(f"Top twins to find: {N_TWINS}")
 """))
 
