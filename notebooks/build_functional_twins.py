@@ -28,45 +28,13 @@ cells.append(md("""# 6. Functional Landscape Twins — Kenya
 """))
 
 # =========================================================================
-# CELL 2: GEE EXPORT
+# CELL 2: STAC MOSAIC
 # =========================================================================
-cells.append(md("""## 0. Prerequisite: Export a Kenya-wide mosaic from Google Earth Engine
+cells.append(md("""## 0. Build a Kenya-wide mosaic from Planetary Computer STAC
 
-Run the script below in the [GEE Code Editor](https://code.earthengine.google.com/) to export a cloud-free Sentinel-2 mosaic with vegetation and built-up indices at ~100 m resolution. Download the resulting GeoTIFF and place it at the path set in the next cell.
+This notebook queries the [Planetary Computer STAC API](https://planetarycomputer.microsoft.com/) for cloud-free Sentinel-2 L2A scenes covering Kenya, then processes each scene individually at ~100 m resolution — segmenting, extracting features, and attaching vector data — finally combining all components into a national similarity analysis.
 
-```javascript
-// Paste into https://code.earthengine.google.com/
-var geometry = ee.Geometry.Rectangle([33.5, -5.0, 42.0, 5.0]);  // Kenya bounding box
-
-var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-  .filterBounds(geometry)
-  .filterDate('2023-01-01', '2023-12-31')
-  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
-  .median()
-  .clip(geometry);
-
-var ndvi = s2.normalizedDifference(['B8', 'B4']).rename('ndvi');
-var ndbi = s2.normalizedDifference(['B11', 'B8']).rename('ndbi');
-var ndwi = s2.normalizedDifference(['B3', 'B8']).rename('ndwi');
-
-// Texture: local variance of NDVI in a 3×3 window
-var texture = ndvi.reduceNeighborhood(ee.Reducer.variance(), ee.Kernel.square(1)).rename('texture');
-
-var mosaic = ndvi.addBands(ndbi).addBands(ndwi).addBands(texture);
-
-Export.image.toDrive({
-  image: mosaic.toFloat(),
-  description: 'kenya_mosaic_100m',
-  scale: 100,
-  crs: 'EPSG:4326',
-  region: geometry,
-  maxPixels: 1e10,
-  fileFormat: 'GeoTIFF',
-  formatOptions: {cloudOptimized: true}
-});
-```
-
-After the export finishes, download `kenya_mosaic_100m.tif` and place it in the project root directory.
+No external exports are needed. The first run downloads and caches all data locally.
 """))
 
 # =========================================================================
@@ -75,7 +43,8 @@ After the export finishes, download `kenya_mosaic_100m.tif` and place it in the 
 cells.append(md("## 1. Install dependencies"))
 cells.append(code("""import subprocess, sys
 req = ["geopandas", "pyarrow", "rasterio", "scikit-image", "scikit-learn",
-       "matplotlib", "pandas", "numpy", "requests", "shapely"]
+       "matplotlib", "pandas", "numpy", "requests", "shapely",
+       "pystac-client", "planetary-computer"]
 for p in req:
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", p])
 """))
@@ -102,6 +71,9 @@ from shapely.geometry import Point, box, shape
 from shapely.ops import unary_union
 from shapely import wkt
 
+import pystac_client
+from planetary_computer import sign as pc_sign
+
 from skimage.segmentation import slic
 from skimage.filters import sobel
 from sklearn.preprocessing import StandardScaler
@@ -119,10 +91,16 @@ print(f"Project root: {PROJECT_ROOT}")
 # CELL 5: CONFIG
 # =========================================================================
 cells.append(code("""# --- Paths ---
-MOSAIC_PATH = PROJECT_ROOT / "kenya_mosaic_100m.tif"
 ADMIN_PATH = PROJECT_ROOT / "ken_admin2.geojson"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+# --- STAC query parameters ---
+KENYA_BBOX = [33.5, -5.0, 42.0, 5.0]
+DATE_RANGE = "2023-01-01/2023-12-31"
+MAX_CLOUD = 20
+TARGET_RES_M = 100         # target resolution in meters
+MAX_SCENES = 60            # max Sentinel-2 scenes to process
 
 # --- City CBD coordinates ---
 CITIES = {
@@ -130,15 +108,14 @@ CITIES = {
     "Mombasa":  Point(39.6682, -4.0435),
     "Kisumu":   Point(34.7680, -0.0917),
 }
-CITY_BUFFER_KM = 20        # components within this distance are the reference set
-EXCLUDE_BUFFER_KM = 30     # components within this distance are excluded from query results
-N_TWINS = 50               # number of twin candidates to report
-
-# --- Vector feature buffer radii ---
+CITY_BUFFER_KM = 20
+EXCLUDE_BUFFER_KM = 30
+N_TWINS = 50
 FEATURE_BUFFER_KM = 5      # for health facilities and schools
 
 print(f"Reference cities: {list(CITIES.keys())}")
-print(f"Reference buffer: {CITY_BUFFER_KM} km")
+print(f"Mosaic: STAC query in Kenya bbox, {DATE_RANGE}, cloud < {MAX_CLOUD}%")
+print(f"Target resolution: {TARGET_RES_M} m")
 print(f"Top twins to find: {N_TWINS}")
 """))
 
@@ -224,132 +201,151 @@ else:
 """))
 
 # =========================================================================
-# CELL 8: LOAD MOSAIC
+# CELL 8: STAC PER-TILE PROCESSING
 # =========================================================================
-cells.append(md("## 4. Load and verify the mosaic"))
-cells.append(code("""if not MOSAIC_PATH.exists():
-    raise FileNotFoundError(
-        f"Mosaic not found at {MOSAIC_PATH}.\\n"
-        f"Run the GEE export script in the Code Editor, download the .tif, "
-        f"and place it at the path above."
-    )
+cells.append(md("## 4. Process each Sentinel-2 scene from Planetary Computer"))
+cells.append(code("""BAND_NAMES = ["ndvi", "ndbi", "ndwi"]
 
-with rasterio.open(MOSAIC_PATH) as src:
-    mosaic_meta = src.meta.copy()
-    mosaic_bands = src.descriptions
-    mosaic_shape = (src.height, src.width)
-    print(f"Mosaic: {mosaic_shape[0]}×{mosaic_shape[1]} pixels")
-    print(f"CRS: {src.crs}")
-    print(f"Bands ({src.count}): {[d or f'Band {i+1}' for i, d in enumerate(src.descriptions)]}")
-    print(f"Bounds: {src.bounds}")
-"""))
+def _read_at_res(href, target_res_m, crs):
+    with rasterio.open(href) as src:
+        scale = max(1, (abs(src.transform[0]) or 10) / target_res_m)
+        h = max(1, int(src.height * scale))
+        w = max(1, int(src.width * scale))
+        return src.read(out_shape=(1, h, w))[0], src.transform
 
-# =========================================================================
-# CELL 9: SLIC SEGMENTATION
-# =========================================================================
-cells.append(md("## 5. Segment the mosaic into components"))
-cells.append(code("""with rasterio.open(MOSAIC_PATH) as src:
-    mosaic_data = src.read()
-    mosaic_profile = src.profile
+def process_stac_tile(item, admin_gdf, health_gdf, schools_gdf, roads_gdf, pop_src):
+    from planetary_computer import sign
+    signed = sign(item)
+    crs = item.properties.get("proj:epsg", 4326)
 
-# mosaic_data shape: (bands, H, W) → transpose to (H, W, bands)
-img = np.moveaxis(mosaic_data, 0, -1)
-H, W, C = img.shape
-print(f"Array shape: {H}×{W}×{C}")
+    # Read bands at target resolution
+    b04, _ = _read_at_res(signed.assets["B04"].href, TARGET_RES_M, crs)
+    b03, _ = _read_at_res(signed.assets["B03"].href, TARGET_RES_M, crs)
+    b08, _ = _read_at_res(signed.assets["B08"].href, TARGET_RES_M, crs)
+    b11, src_tfm = _read_at_res(signed.assets["B11"].href, TARGET_RES_M, crs)
+    s2 = np.dstack([np.nan_to_num(b04.astype(float)),
+                    np.nan_to_num(b03.astype(float)),
+                    np.nan_to_num(b08.astype(float)),
+                    np.nan_to_num(b11.astype(float))])
 
-# Normalize each band to [0,1] for SLIC
-seg_input = np.zeros_like(img)
-for c in range(C):
-    band = img[:, :, c]
-    lo, hi = np.nanquantile(band, 0.02), np.nanquantile(band, 0.98)
-    seg_input[:, :, c] = np.nan_to_num(np.clip((band - lo) / (hi - lo + 1e-10), 0, 1))
+    ndvi = (s2[:, :, 2] - s2[:, :, 0]) / (s2[:, :, 2] + s2[:, :, 0] + 1e-10)
+    ndbi = (s2[:, :, 3] - s2[:, :, 2]) / (s2[:, :, 3] + s2[:, :, 2] + 1e-10)
+    ndwi = (s2[:, :, 1] - s2[:, :, 2]) / (s2[:, :, 1] + s2[:, :, 2] + 1e-10)
 
-# Run SLIC
-N_SEGMENTS = 3000
-COMPACTNESS = 10
-print(f"Running SLIC (n_segments={N_SEGMENTS}, compactness={COMPACTNESS})...", flush=True)
-segments = slic(seg_input, n_segments=N_SEGMENTS, compactness=COMPACTNESS,
-                start_label=1, channel_axis=-1)
-n_components = len(np.unique(segments))
-print(f"Segments found: {n_components}")
-"""))
+    seg_stack = np.dstack([ndvi, ndbi, ndwi])
+    seg_input = np.zeros_like(seg_stack)
+    for c in range(3):
+        band = seg_stack[:, :, c]
+        lo, hi = np.nanquantile(band, 0.02), np.nanquantile(band, 0.98)
+        seg_input[:, :, c] = np.clip((band - lo) / (hi - lo + 1e-10), 0, 1)
 
-# =========================================================================
-# CELL 10: EXTRACT SPECTRAL FEATURES
-# =========================================================================
-cells.append(md("## 6. Extract per-component features"))
-cells.append(code("""BAND_NAMES = [d or f"Band_{i}" for i, d in enumerate(mosaic_bands)]
+    n_seg = max(20, (seg_stack.shape[0] * seg_stack.shape[1]) // 15000)
+    segs = slic(seg_input, n_segments=n_seg, compactness=10, start_label=1, channel_axis=-1)
 
-def extract_spectral_features(img, segments):
-    features = []
-    for label in np.unique(segments):
-        mask = (segments == label)
+    rows = []
+    geo_rows = []
+    for label in np.unique(segs):
+        mask = (segs == label)
         px = mask.sum()
         if px < 5:
             continue
-        row = {"component_id": int(label), "pixel_count": int(px)}
-        for c in range(C):
-            vals = img[:, :, c][mask]
-            vals = vals[~np.isnan(vals)]
-            if len(vals) == 0:
-                continue
-            row[f"{BAND_NAMES[c]}_mean"] = float(np.mean(vals))
-            row[f"{BAND_NAMES[c]}_std"] = float(np.std(vals))
-        row["area_km2"] = px * 0.01
-        features.append(row)
-    return pd.DataFrame(features)
+        cid = int(f"{item.id[-6:]}{label:04d}")
+        r = {"component_id": cid, "pixel_count": px, "scene_id": item.id}
+        for i, name in enumerate(BAND_NAMES):
+            vals = seg_stack[:, :, i][mask]
+            vals = vals[np.isfinite(vals)]
+            if len(vals):
+                r[f"{name}_mean"] = float(np.mean(vals))
+                r[f"{name}_std"] = float(np.std(vals))
+        r["area_km2"] = px * (TARGET_RES_M ** 2) / 1e6
+        rows.append(r)
 
-components = extract_spectral_features(img, segments)
-print(f"Components with features: {len(components)}")
-
-# --- Assign each component to its nearest admin2 ---
-# Compute component centroids in pixel coords, then georeference
-def component_geometries(segments, profile):
-    transform = profile["transform"]
-    geoms = {}
-    for label in np.unique(segments):
-        mask = (segments == label)
-        if mask.sum() < 5:
-            continue
         ys, xs = np.where(mask)
-        lons, lats = rasterio.transform.xy(transform, ys, xs, offset="center")
-        centroid_lon = np.mean(lons)
-        centroid_lat = np.mean(lats)
-        geoms[int(label)] = Point(centroid_lon, centroid_lat)
-    return gpd.GeoDataFrame(
-        {"component_id": list(geoms.keys())},
-        geometry=list(geoms.values()),
-        crs="EPSG:4326",
-    )
+        lons, lats = rasterio.transform.xy(src_tfm, ys, xs, offset="center")
+        geo_rows.append({"component_id": cid,
+                         "geometry": Point(float(np.mean(lons)), float(np.mean(lats)))})
 
-comp_geo = component_geometries(segments, mosaic_profile)
-print(f"Component geometries: {len(comp_geo)}")
+    df = pd.DataFrame(rows)
+    geo = gpd.GeoDataFrame(geo_rows, crs=f"EPSG:{crs}")
+    # Transform to WGS84 for spatial joins
+    if geo.crs != "EPSG:4326":
+        geo = geo.to_crs("EPSG:4326")
 
-# Spatial join with admin2
-if admin2 is not None:
-    comp_geo = gpd.sjoin(comp_geo, admin2[["adm2_name", "adm1_name", "geometry"]],
-                         how="left", predicate="within")
-    comp_geo.drop(columns="index_right", errors="ignore", inplace=True)
-    nan_adm = comp_geo["adm2_name"].isna().sum()
-    if nan_adm:
-        print(f"WARNING: {nan_adm} components fall outside admin boundaries")
-    # Merge back into components df
-    components = components.merge(
-        comp_geo[["component_id", "adm2_name", "adm1_name"]],
-        on="component_id", how="left"
-    )
-else:
-    components["adm2_name"] = "unknown"
-    components["adm1_name"] = "unknown"
+    # Admin join
+    if admin_gdf is not None:
+        geo = gpd.sjoin(geo, admin_gdf[["adm2_name", "adm1_name", "geometry"]],
+                        how="left", predicate="within")
+        geo.drop(columns="index_right", errors="ignore", inplace=True)
+    else:
+        geo["adm2_name"] = "unknown"
+        geo["adm1_name"] = "unknown"
+    df = df.merge(geo[["component_id", "adm2_name", "adm1_name"]], on="component_id")
 
-print(f"Components after admin join: {len(components)}")
-"""))
+    # Vector feature joins
+    def _cnt(gdf_col):
+        if gdf_col is None:
+            return np.zeros(len(geo))
+        bdeg = FEATURE_BUFFER_KM / 111.0
+        cnt = np.zeros(len(geo), dtype=int)
+        try:
+            sidx = gdf_col.sindex
+            for i, pt in enumerate(geo.geometry):
+                b = (pt.x - bdeg, pt.y - bdeg, pt.x + bdeg, pt.y + bdeg)
+                cands = gdf_col.iloc[list(sidx.intersection(b))]
+                if len(cands):
+                    cnt[i] = int((cands.distance(pt) <= bdeg).sum())
+        except Exception:
+            pass
+        return cnt
 
-# =========================================================================
-# CELL 11: ATTACH POPULATION DENSITY
-# =========================================================================
-cells.append(md("## 7. Attach vector features"))
-cells.append(code("""# --- WorldPop ---
+    df["health_facilities"] = _cnt(health_gdf)
+    df["schools"] = _cnt(schools_gdf)
+
+    # Road density
+    road_dens = np.zeros(len(geo))
+    if roads_gdf is not None:
+        try:
+            rproj = roads_gdf.to_crs("EPSG:3857")
+            r_idx = rproj.sindex
+            bm = 2000
+            for i, pt in enumerate(geo.geometry):
+                p = gpd.GeoSeries([pt], crs="EPSG:4326").to_crs("EPSG:3857").iloc[0]
+                b = (p.x - bm, p.y - bm, p.x + bm, p.y + bm)
+                cands = rproj.iloc[list(r_idx.intersection(b))]
+                if len(cands):
+                    clipped = cands.intersection(p.buffer(bm))
+                    road_dens[i] = clipped.length.sum() / 1000 / (math.pi * 4)
+        except Exception:
+            pass
+    df["road_density"] = road_dens
+
+    # Pop density
+    pop = np.full(len(geo), np.nan)
+    if pop_src is not None:
+        try:
+            coords = [(pt.x, pt.y) for pt in geo.geometry]
+            samples = list(pop_src.sample(coords))
+            pop = np.array([s[0] for s in samples]).astype(float)
+            pop[pop < 0] = np.nan
+        except Exception:
+            pass
+    df["pop_density"] = pop
+
+    return df, geo
+
+# --- Load vector features into memory ---
+def _load_parquet(path):
+    if path and os.path.exists(path):
+        try:
+            return gpd.read_parquet(path)
+        except Exception:
+            pass
+    return None
+
+health_gdf = _load_parquet(health_path)
+schools_gdf = _load_parquet(schools_path)
+roads_gdf = _load_parquet(roads_path)
+
 POP_PATH = VECTOR_DIR / "ken_ppp_2020_constrained.tif"
 if not POP_PATH.exists():
     pop_url = "https://data.worldpop.org/GIS/Population/Global_2000_2020/2020/KEN/ken_ppp_2020_constrained.tif"
@@ -358,123 +354,64 @@ if not POP_PATH.exists():
         r = requests.get(pop_url, timeout=300, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
         POP_PATH.write_bytes(r.content)
-        print(f"  done ({POP_PATH.stat().st_size >> 20} MB)")
     except Exception as e:
         print(f"  FAILED: {e}")
+pop_src = rasterio.open(POP_PATH) if POP_PATH.exists() else None
 
-def sample_raster_at_points(points_gdf, raster_path, col_name="pop_density"):
-    values = np.full(len(points_gdf), np.nan)
-    try:
-        with rasterio.open(raster_path) as src:
-            coords = [(pt.x, pt.y) for pt in points_gdf.geometry]
-            samples = list(src.sample(coords))
-            values = np.array([s[0] for s in samples]).astype(float)
-            values[values < 0] = np.nan
-    except Exception as e:
-        print(f"  WARNING: pop sampling failed: {e}")
-    return values
+for label, gdf in [("Health", health_gdf), ("Schools", schools_gdf), ("Roads", roads_gdf),
+                   ("Pop", pop_src)]:
+    status = "loaded" if (gdf is not None) else "unavailable"
+    print(f"  {label}: {status}")
 
-pop_vals = sample_raster_at_points(comp_geo, POP_PATH, "pop_density")
-comp_geo["pop_density"] = pop_vals
-components = components.merge(comp_geo[["component_id", "pop_density"]], on="component_id", how="left")
-print(f"Pop density attached: {np.isfinite(pop_vals).sum()} / {len(pop_vals)} have values")
-"""))
+# --- Query STAC ---
+import pystac_client
+from planetary_computer import sign as pc_sign
 
-# =========================================================================
-# CELL 12: SPATIAL JOIN — HEALTH FACILITIES
-# =========================================================================
-cells.append(code("""def _load_parquet(path):
-    if not path or not os.path.exists(path):
-        return None
-    try:
-        return gpd.read_parquet(path)
-    except Exception as e:
-        print(f"  WARNING: failed to load {path}: {e}")
-        return None
-
-def count_nearby(points_gdf, parquet_path, buffer_km=5, col_name="features"):
-    counts = np.zeros(len(points_gdf), dtype=int)
-    feats = _load_parquet(parquet_path)
-    if feats is None or len(feats) == 0:
-        print(f"  {col_name}: no data loaded")
-        return counts
-    try:
-        if feats.crs is None:
-            feats.set_crs("EPSG:4326", inplace=True)
-        feats_sindex = feats.sindex
-        buffer_deg = buffer_km / 111.0
-        for i, pt in enumerate(points_gdf.geometry):
-            bounds = (pt.x - buffer_deg, pt.y - buffer_deg,
-                      pt.x + buffer_deg, pt.y + buffer_deg)
-            candidates = feats.iloc[list(feats_sindex.intersection(bounds))]
-            if len(candidates) == 0:
-                continue
-            distances = candidates.distance(pt)
-            counts[i] = int((distances <= buffer_deg).sum())
-        print(f"  {col_name}: max={counts.max()}, mean={counts.mean():.1f}")
-    except Exception as e:
-        print(f"  {col_name}: FAILED ({e})")
-    return counts
-
-comp_geo["health_facilities"] = count_nearby(comp_geo, health_path, FEATURE_BUFFER_KM, "Health facilities")
-"""))
-
-# =========================================================================
-# CELL 13: SPATIAL JOIN — SCHOOLS
-# =========================================================================
-cells.append(code("""comp_geo["schools"] = count_nearby(comp_geo, schools_path, FEATURE_BUFFER_KM, "Schools")
-"""))
-
-# =========================================================================
-# CELL 14: ROAD DENSITY
-# =========================================================================
-cells.append(code("""def road_density(points_gdf, parquet_path, buffer_km=2):
-    densities = np.zeros(len(points_gdf))
-    roads = _load_parquet(parquet_path)
-    if roads is None or len(roads) == 0:
-        print("  SKIP: roads not available")
-        return densities
-    try:
-        if roads.crs is None:
-            roads.set_crs("EPSG:4326", inplace=True)
-        roads_proj = roads.to_crs("EPSG:3857")
-        roads_sindex = roads_proj.sindex
-        buffer_m = buffer_km * 1000
-        for i, pt in enumerate(points_gdf.geometry):
-            pt_proj = gpd.GeoSeries([pt], crs="EPSG:4326").to_crs("EPSG:3857").iloc[0]
-            bounds = (pt_proj.x - buffer_m, pt_proj.y - buffer_m,
-                      pt_proj.x + buffer_m, pt_proj.y + buffer_m)
-            candidates = roads_proj.iloc[list(roads_sindex.intersection(bounds))]
-            if len(candidates) == 0:
-                continue
-            circle = pt_proj.buffer(buffer_m)
-            clipped = candidates.intersection(circle)
-            total_km = clipped.length.sum() / 1000
-            densities[i] = total_km / (math.pi * (buffer_km ** 2))
-        print(f"  Road density: max={densities.max():.2f} km/km2, mean={densities.mean():.2f}")
-    except Exception as e:
-        print(f"  Road density FAILED: {e}")
-    return densities
-
-comp_geo["road_density"] = road_density(comp_geo, roads_path, buffer_km=2)
-"""))
-
-# =========================================================================
-# CELL 15: MERGE ALL FEATURES
-# =========================================================================
-cells.append(code("""# Merge all vector features into components
-vector_cols = ["pop_density", "health_facilities", "schools", "road_density"]
-components = components.merge(
-    comp_geo[["component_id"] + vector_cols], on="component_id", how="left"
+catalog = pystac_client.Client.open(
+    "https://planetarycomputer.microsoft.com/api/stac/v1",
+    modifier=pc_sign)
+search = catalog.search(
+    collections=["sentinel-2-l2a"],
+    bbox=KENYA_BBOX,
+    datetime=DATE_RANGE,
+    query={"eo:cloud_cover": {"lt": MAX_CLOUD}},
 )
+items = sorted(search.items(), key=lambda i: i.properties.get("eo:cloud_cover", 100))
+print(f"STAC items found: {len(items)}")
 
-# Fill NaN
-for c in vector_cols:
-    components[c] = components[c].fillna(0)
+if len(items) > MAX_SCENES:
+    items = items[:MAX_SCENES]
+    print(f"  Using top {MAX_SCENES} by cloud cover")
 
-print(f"Final component table: {len(components)} rows, {len(components.columns)} columns")
-print("Columns:", list(components.columns))
-print(components[["component_id", "adm2_name", "pop_density", "health_facilities", "schools", "road_density"]].head(10))
+# --- Process each scene ---
+all_components = []
+all_geo = []
+
+for idx, item in enumerate(items):
+    item_id = item.id
+    cc = item.properties.get("eo:cloud_cover", -1)
+    print(f"[{idx+1}/{len(items)}] {item_id} cloud={cc}%...", end=" ", flush=True)
+    try:
+        df, geo = process_stac_tile(item, admin2, health_gdf, schools_gdf, roads_gdf, pop_src)
+        all_components.append(df)
+        all_geo.append(geo)
+        print(f"{len(df)} components")
+    except Exception as e:
+        print(f"FAILED: {e}")
+
+if pop_src is not None:
+    pop_src.close()
+
+components = pd.concat(all_components, ignore_index=True) if all_components else pd.DataFrame()
+comp_geo = pd.concat(all_geo, ignore_index=True) if all_geo else gpd.GeoDataFrame()
+
+print(f"\\nTotal components: {len(components)}")
+print(f"Columns: {list(components.columns)}")
+
+VECTOR_COLS = ["pop_density", "health_facilities", "schools", "road_density"]
+for c in VECTOR_COLS:
+    if c in components.columns:
+        components[c] = components[c].fillna(0)
 """))
 
 # =========================================================================
@@ -484,7 +421,7 @@ cells.append(md("## 8. Compute similarity matrix"))
 cells.append(code("""# Feature columns: spectral means/stds + vector features
 feat_cols = [c for c in components.columns
              if c.endswith("_mean") or c.endswith("_std")]
-feat_cols += vector_cols
+feat_cols += VECTOR_COLS
 print(f"Feature columns ({len(feat_cols)}):")
 for c in feat_cols:
     print(f"  {c}")
@@ -510,14 +447,19 @@ print(f"Similarity range: [{S.min():.4f}, {S.max():.4f}]")
 # CELL 17: DEFINE REFERENCE SET
 # =========================================================================
 cells.append(code("""# --- Reference: components within CITY_BUFFER_KM of a city CBD ---
-comp_geo_clean = comp_geo.loc[clean_idx].copy()
 buffer_deg = CITY_BUFFER_KM / 111.0
 
-is_reference = np.zeros(len(comp_geo_clean), dtype=bool)
+# Look up geometry for each clean component by component_id
+geo_map = comp_geo.set_index("component_id")["geometry"]
+clean_cids = components.loc[clean_idx, "component_id"].values
+clean_geoms = geo_map.loc[clean_cids]
+
+is_reference = np.zeros(len(clean_geoms), dtype=bool)
 for city_name, city_pt in CITIES.items():
-    mask = comp_geo_clean.distance(city_pt) <= buffer_deg
+    dists = clean_geoms.distance(city_pt)
+    mask = dists <= buffer_deg
     is_reference |= mask.values
-    n = mask.sum()
+    n = int(mask.sum())
     if n:
         print(f"  {city_name}: {n} reference components")
 
@@ -526,7 +468,8 @@ print(f"Total reference components: {len(ref_idx)}")
 
 if len(ref_idx) < 3:
     raise RuntimeError(f"Too few reference components ({len(ref_idx)}). "
-                       f"The mosaic may not cover the city areas. Check the GEE export.")
+                       f"The STAC query may not cover the city areas. "
+                       f"Try expanding the date range or cloud tolerance.")
 """))
 
 # =========================================================================
@@ -540,7 +483,7 @@ target = ref_centroid.reshape(1, -1)
 similarities = cosine_similarity(X, target).flatten()
 
 results = pd.DataFrame({
-    "component_id": components.loc[clean_idx, "component_id"].values,
+    "component_id": clean_cids,
     "adm2_name": components.loc[clean_idx, "adm2_name"].values,
     "adm1_name": components.loc[clean_idx, "adm1_name"].values,
     "similarity": similarities,
@@ -553,9 +496,9 @@ results["is_reference"] = is_reference
 
 # --- Exclude reference components and those within EXCLUDE_BUFFER_KM ---
 exclude_deg = EXCLUDE_BUFFER_KM / 111.0
-is_near_city = np.zeros(len(comp_geo_clean), dtype=bool)
+is_near_city = np.zeros(len(clean_geoms), dtype=bool)
 for city_pt in CITIES.values():
-    is_near_city |= (comp_geo_clean.distance(city_pt) <= exclude_deg).values
+    is_near_city |= (clean_geoms.distance(city_pt) <= exclude_deg).values
 
 results["is_near_city"] = is_near_city
 query = results[~results["is_reference"] & ~results["is_near_city"]].copy()
@@ -614,9 +557,9 @@ cells.append(code("""if admin2 is not None:
             label=f"{city_name} ({EXCLUDE_BUFFER_KM}km)" if city_name == "Nairobi" else "")
 
     # Plot top twin component centroids
-    twin_geo = comp_geo_clean.loc[results["component_id"].isin(top["component_id"])]
+    twin_ids = set(top["component_id"])
+    twin_geo = comp_geo[comp_geo["component_id"].isin(twin_ids)]
     if len(twin_geo):
-        twin_geo = twin_geo.to_crs("EPSG:4326")
         twin_geo.plot(ax=ax, color="cyan", markersize=15, marker="*",
                       edgecolor="black", linewidth=0.5, label="Top 50 twins")
 
