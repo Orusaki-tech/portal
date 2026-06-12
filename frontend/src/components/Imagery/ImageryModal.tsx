@@ -151,10 +151,16 @@ export default function ImageryModal({
     return region ? computeBbox(region) : [37, -4, 38, 4]
   }, [region])
 
-  const geojsonParam = useMemo(() => {
-    if (!region?.geometry) return ""
-    return "&geojson=" + encodeURIComponent(JSON.stringify(region.geometry))
+  const simplifiedGeojson = useMemo(() => {
+    if (!region?.geometry) return null
+    const simplified = turf.simplify(region.geometry, { tolerance: 0.001, highQuality: false })
+    return simplified
   }, [region])
+
+  const geojsonParam = useMemo(() => {
+    if (!simplifiedGeojson) return ""
+    return "&geojson=" + encodeURIComponent(JSON.stringify(simplifiedGeojson))
+  }, [simplifiedGeojson])
 
   const previewTileUrl = useMemo(() => {
     if (fetchStatus !== "previewing" || !fetchResult?.preview_url || !region?.geometry) return null
@@ -356,8 +362,8 @@ export default function ImageryModal({
       m.removeSource(sourceId)
     }
     if (tileUrl) {
-      m.addSource(sourceId, { type: "raster", tiles: [tileUrl], tileSize: 256, mask: geometry ?? undefined } as any)
-      m.addLayer({ id: layerId, type: "raster", source: sourceId })
+      m.addSource(sourceId, { type: "raster", tiles: [tileUrl], tileSize: 256 } as any)
+      m.addLayer({ id: layerId, type: "raster", source: sourceId }, "selected-polygon-line")
     }
   }, [])
 
@@ -456,7 +462,7 @@ export default function ImageryModal({
         type: "line",
         source: "buffer-polygon",
         paint: { "line-color": "#f59e0b", "line-width": 2, "line-opacity": 0.8, "line-dasharray": [5, 5] },
-      })
+      }, "selected-polygon-line")
     }
 
     m.fitBounds([[regionBbox[0], regionBbox[1]], [regionBbox[2], regionBbox[3]]], { padding: 40 })
