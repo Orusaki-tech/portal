@@ -241,13 +241,15 @@ def _read_at_res(href, target_pixels=1000):
 def process_stac_tile(item, admin_gdf, health_gdf, schools_gdf, roads_gdf, pop_src):
     from planetary_computer import sign
     signed = sign(item)
-    crs = item.properties.get("proj:epsg", 4326)
 
     # Read bands at reduced resolution (~1000×1000)
     b04, _ = _read_at_res(signed.assets["B04"].href)
     b03, _ = _read_at_res(signed.assets["B03"].href)
     b08, _ = _read_at_res(signed.assets["B08"].href)
     b11, src_tfm = _read_at_res(signed.assets["B11"].href)
+    # Get CRS from the raster itself (reliable)
+    with rasterio.open(signed.assets["B04"].href) as _src:
+        tile_crs = _src.crs
     s2 = np.dstack([np.nan_to_num(b04.astype(float)),
                     np.nan_to_num(b03.astype(float)),
                     np.nan_to_num(b08.astype(float)),
@@ -291,10 +293,9 @@ def process_stac_tile(item, admin_gdf, health_gdf, schools_gdf, roads_gdf, pop_s
                          "geometry": Point(float(np.mean(lons)), float(np.mean(lats)))})
 
     df = pd.DataFrame(rows)
-    geo = gpd.GeoDataFrame(geo_rows, crs=f"EPSG:{crs}")
-    # Transform to WGS84 for spatial joins
-    if geo.crs != "EPSG:4326":
-        geo = geo.to_crs("EPSG:4326")
+    geo = gpd.GeoDataFrame(geo_rows, crs=tile_crs)
+    # Transform to WGS84 for spatial joins (always, to be safe)
+    geo = geo.to_crs("EPSG:4326")
 
     # Admin join
     if admin_gdf is not None:
