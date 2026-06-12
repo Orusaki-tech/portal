@@ -180,6 +180,7 @@ export default function ImageryModal({
         max_cloud_cover: maxCloudCover,
       })
       setCoverage(res)
+      setFetchError(null)
     } catch {
       setCoverage(null)
     } finally {
@@ -679,7 +680,13 @@ export default function ImageryModal({
               </span>
             )}
             {fetchStatus === "error" && (
-              <span className="text-red-600">{fetchError || "Failed to load imagery"}</span>
+              <span className="text-red-600">
+                {fetchError?.includes("API key") ? (
+                  <>Authentication required — <button onClick={() => window.location.href = "/login"} className="underline hover:text-red-800">sign in</button> to access satellite imagery</>
+                ) : (
+                  fetchError || "Failed to load imagery"
+                )}
+              </span>
             )}
             {fetchStatus === "idle" && !coverage && (
               <span className="text-gray-400">Configure filters and check coverage, then fetch</span>
@@ -725,27 +732,46 @@ export default function ImageryModal({
           {/* Error action buttons */}
           {fetchStatus === "error" && (
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setMaxCloudCover((c) => Math.min(100, c + 25))}
-                className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
-              >
-                Raise cloud cover
-              </button>
-              <button
-                onClick={() => {
-                  setDateFrom(threeMonthsAgo())
-                  setDateTo(todayISO())
-                }}
-                className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
-              >
-                Expand dates
-              </button>
-              <button
-                onClick={handleFetch}
-                className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800 hover:bg-blue-200"
-              >
-                Retry
-              </button>
+              {fetchError?.includes("API key") ? (
+                <>
+                  <button
+                    onClick={() => { localStorage.removeItem("realitysync_api_key"); window.location.href = "/login" }}
+                    className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+                  >
+                    Sign In
+                  </button>
+                  <button
+                    onClick={() => { localStorage.removeItem("realitysync_api_key"); localStorage.removeItem("realitysync_user"); window.location.reload() }}
+                    className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                  >
+                    Clear stored key
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setMaxCloudCover((c) => Math.min(100, c + 25))}
+                    className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
+                  >
+                    Raise cloud cover
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDateFrom(threeMonthsAgo())
+                      setDateTo(todayISO())
+                    }}
+                    className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
+                  >
+                    Expand dates
+                  </button>
+                  <button
+                    onClick={handleFetch}
+                    className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800 hover:bg-blue-200"
+                  >
+                    Retry
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
