@@ -90,6 +90,7 @@ cells.append(code("""import json, os, sys, warnings, math
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import requests
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -779,40 +780,65 @@ plt.show()
 # =========================================================================
 # CELL 22: VALIDATE
 # =========================================================================
-cells.append(code("""# --- Validate against FEWS NET 2017 ground truth ---
+cells.append(code("""# --- Validate against FEWS NET ground truth ---
 def _fetch_fews_2017():
+    # Try old API format (GeoJSON with geometry + phase column)
     for scenario in ["CS", "ML"]:
         url = (f"https://fdw.fews.net/api/ipcphasemap/"
                f"?country=KE&scenario={scenario}&collection_date=2017-07-01&format=geojson")
         try:
             df = gpd.read_file(url)
-            if len(df) == 0:
-                continue
-            pc = [c for c in df.columns if "phase" in c.lower() or "ipc" in c.lower()]
-            if pc:
-                return df, pc[0]
-            print(f"  scenario={scenario}: no phase col, columns={list(df.columns)}")
-        except Exception as ex:
-            print(f"  scenario={scenario}: {ex}")
-    return None, None
+            if len(df) > 0:
+                pc = [c for c in df.columns if "phase" in c.lower() or "ipc" in c.lower()]
+                if pc:
+                    return df, pc[0], "old"
+        except Exception:
+            pass
+    # Try new API format (returns value-based, no geometry)
+    try:
+        resp = requests.get("https://fdw.fews.net/api/ipcphasemap/?country=KE",
+                        headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            feats = data.get("features", [])
+            if feats and "value" in feats[0].get("properties", {}):
+                # New format: value = IPC phase, no geometry
+                records = []
+                for f in feats:
+                    p = f["properties"]
+                    if p.get("scenario", "").startswith("ML") and p.get("unit_type") == "fsc_ad":
+                        records.append(p)
+                return records, "value", "new"
+    except Exception:
+        pass
+    return None, None, None
 
-fews_2017, phase_col = _fetch_fews_2017()
-if fews_2017 is not None and phase_col:
+fews_result = _fetch_fews_2017()
+if fews_result[2] == "old":
+    fews_2017, phase_col, _ = fews_result
     crisis_2017 = fews_2017[fews_2017[phase_col] >= 3]
-    print(f"FEWS NET 2017 Phase 3+ polygons: {len(crisis_2017)}")
+    print(f"FEWS NET Phase 3+ polygons: {len(crisis_2017)}")
     validation = []
     for _, row in admin2.iterrows():
         overlap = crisis_2017.intersects(row["geometry"]).any()
-        validation.append({"adm2_name": row["adm2_name"],
-                           "actual_crisis_2017": overlap})
+        validation.append({"adm2_name": row["adm2_name"], "actual_crisis_2017": overlap})
     val_df = pd.DataFrame(validation)
-    print(f"Regions actually in crisis (2017): {val_df['actual_crisis_2017'].sum()} / {len(val_df)}")
-else:
-    print("FEWS NET 2017 unavailable — using known drought zones as ground truth.")
+elif fews_result[2] == "new":
+    records, col, _ = fews_result
+    print(f"FEWS NET new API: {len(records)} records, values={sorted(set(r[col] for r in records))}")
+    # New format lacks geometry — fall through to known zones
     val_df = pd.DataFrame({
         "adm2_name": admin2["adm2_name"],
         "actual_crisis_2017": admin2["adm1_name"].isin(crisis_zone_names),
     })
+else:
+    print("FEWS NET unavailable — using known drought zones as ground truth.")
+    val_df = pd.DataFrame({
+        "adm2_name": admin2["adm2_name"],
+        "actual_crisis_2017": admin2["adm1_name"].isin(crisis_zone_names),
+    })
+
+print(f"Validation samples: {len(val_df)}, crisis regions: {val_df['actual_crisis_2017'].sum()}")
 """))
 
 # =========================================================================
