@@ -218,12 +218,16 @@ else:
 cells.append(md("## 4. Process each Sentinel-2 scene from Planetary Computer"))
 cells.append(code("""BAND_NAMES = ["ndvi", "ndbi", "ndwi"]
 
-def _read_at_res(href, target_res_m, crs):
+def _read_at_res(href, target_res_m):
     with rasterio.open(href) as src:
-        scale = max(1, (abs(src.transform[0]) or 10) / target_res_m)
-        h = max(1, int(src.height * scale))
-        w = max(1, int(src.width * scale))
-        return src.read(out_shape=(1, h, w))[0], src.transform
+        native_res = abs(src.transform[0])
+        scale = target_res_m / native_res if native_res > 0 else 10
+        h = max(1, int(src.height / scale))
+        w = max(1, int(src.width / scale))
+        data = src.read(out_shape=(1, h, w)).astype(np.float32)
+        new_tfm = src.transform * src.transform.scale(
+            src.width / w, src.height / h)
+        return data[0], new_tfm
 
 def process_stac_tile(item, admin_gdf, health_gdf, schools_gdf, roads_gdf, pop_src):
     from planetary_computer import sign
@@ -231,10 +235,10 @@ def process_stac_tile(item, admin_gdf, health_gdf, schools_gdf, roads_gdf, pop_s
     crs = item.properties.get("proj:epsg", 4326)
 
     # Read bands at target resolution
-    b04, _ = _read_at_res(signed.assets["B04"].href, TARGET_RES_M, crs)
-    b03, _ = _read_at_res(signed.assets["B03"].href, TARGET_RES_M, crs)
-    b08, _ = _read_at_res(signed.assets["B08"].href, TARGET_RES_M, crs)
-    b11, src_tfm = _read_at_res(signed.assets["B11"].href, TARGET_RES_M, crs)
+    b04, _ = _read_at_res(signed.assets["B04"].href, TARGET_RES_M)
+    b03, _ = _read_at_res(signed.assets["B03"].href, TARGET_RES_M)
+    b08, _ = _read_at_res(signed.assets["B08"].href, TARGET_RES_M)
+    b11, src_tfm = _read_at_res(signed.assets["B11"].href, TARGET_RES_M)
     s2 = np.dstack([np.nan_to_num(b04.astype(float)),
                     np.nan_to_num(b03.astype(float)),
                     np.nan_to_num(b08.astype(float)),
