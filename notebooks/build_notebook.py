@@ -244,13 +244,13 @@ crisis_zone_names = [
     "Garissa", "Tana River", "Isiolo", "Samburu"
 ]
 
-admin2["adm2_name_lower"] = admin2["adm2_name"].str.lower()
-crisis_mask = admin2["adm2_name_lower"].isin([n.lower() for n in crisis_zone_names])
+# adm1_name holds the county name (e.g. "Turkana"), adm2_name holds sub-counties
+crisis_mask = admin2["adm1_name"].isin(crisis_zone_names)
 crisis_admin2 = admin2[crisis_mask].copy()
 test_admin2 = admin2[~crisis_mask].copy()
 
-print(f"Crisis zones: {len(crisis_admin2)} — {list(crisis_admin2['adm2_name'])}")
-print(f"Test zones:   {len(test_admin2)}")
+print(f"Crisis sub-counties: {len(crisis_admin2)} — counties: {list(crisis_admin2['adm1_name'].unique())}")
+print(f"Test sub-counties:   {len(test_admin2)}")
 
 # Sample 20 test zones for a balanced comparison
 np.random.seed(42)
@@ -606,7 +606,7 @@ except Exception as e:
     print(f"FEWS NET 2017 fetch failed: {e}")
     val_df = pd.DataFrame({
         "adm2_name": admin2["adm2_name"],
-        "actual_crisis_2017": admin2["adm2_name"].isin(crisis_zone_names),
+        "actual_crisis_2017": admin2["adm1_name"].isin(crisis_zone_names),
     })
 """))
 
