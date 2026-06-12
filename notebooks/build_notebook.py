@@ -352,28 +352,27 @@ cells.append(code("""def compute_indices(stack):
     return indices
 
 
-def segment_and_extract(indices_dict, n_segments=40, compactness=10):
+def _segment_stack(stack, n_segments=40, compactness=10):
+    # Run SLIC on the band stack and return segment labels
     bands_for_seg = []
-    for key in ["ndvi", "ndwi", "ndbi"]:
-        arr = indices_dict.get(key)
-        if arr is not None:
-            lo, hi = np.nanquantile(arr, 0.02), np.nanquantile(arr, 0.98)
-            norm = np.clip((arr - lo) / (hi - lo + 1e-10), 0, 1)
-            bands_for_seg.append(np.nan_to_num(norm))
-    if not bands_for_seg:
-        return None
-    seg_input = np.dstack(bands_for_seg)
-    segments = slic(seg_input, n_segments=n_segments, compactness=compactness,
-                    start_label=1, channel_axis=-1)
+    for i, key in enumerate(["ndvi", "ndwi", "ndbi"]):
+        b = stack[:, :, i] if i < stack.shape[2] else np.zeros(stack.shape[:2])
+        lo, hi = np.nanquantile(b, 0.02), np.nanquantile(b, 0.98)
+        bands_for_seg.append(np.nan_to_num(np.clip((b - lo) / (hi - lo + 1e-10), 0, 1)))
+    seg_input = np.dstack(bands_for_seg) if len(bands_for_seg) >= 3 else np.dstack([bands_for_seg[0]]*3)
+    return slic(seg_input, n_segments=n_segments, compactness=compactness,
+                start_label=1, channel_axis=-1)
 
+def extract_features(indices_dict, segments):
+    # Extract mean/std features per segment from indices
     features = []
     index_keys = list(indices_dict.keys())
     for label in np.unique(segments):
         mask = segments == label
-        pixel_count = mask.sum()
-        if pixel_count < 5:
+        px = mask.sum()
+        if px < 5:
             continue
-        row = {"component_label": int(label), "pixel_count": pixel_count}
+        row = {"component_label": int(label), "pixel_count": px}
         for key in index_keys:
             arr = indices_dict[key]
             if arr is None:
@@ -384,10 +383,19 @@ def segment_and_extract(indices_dict, n_segments=40, compactness=10):
                 continue
             row[f"{key}_mean"] = float(np.mean(vals))
             row[f"{key}_std"] = float(np.std(vals))
-        row["area_km2_approx"] = pixel_count * 0.01
+        row["area_km2_approx"] = px * 0.01
         features.append(row)
     return pd.DataFrame(features)
 
+def collect_pixels(stack, segments):
+    # Return dict {label: (N, C) array} of raw band values per component
+    pixels = {}
+    for label in np.unique(segments):
+        mask = segments == label
+        if mask.sum() < 5:
+            continue
+        pixels[int(label)] = stack[mask]
+    return pixels
 
 def process_admin2_region(region_name, polygon_geom, date_from="2017-01-01",
                           date_to="2017-03-31", max_cloud=20,
@@ -395,22 +403,24 @@ def process_admin2_region(region_name, polygon_geom, date_from="2017-01-01",
     item = query_best_scene(polygon_geom, date_from, date_to, max_cloud)
     if item is None:
         print(f"  {region_name}: NO SCENE FOUND")
-        return None
+        return None, None, None
     geojson_geom = json.loads(json.dumps(polygon_geom.__geo_interface__))
     stack = read_msi_stack(item, geojson_geom, target_shape=target_pixels)
     if stack is None:
         print(f"  {region_name}: NO BAND DATA")
-        return None
+        return None, None, None
     indices = compute_indices(stack)
-    df = segment_and_extract(indices, n_segments=n_segments)
+    segments = _segment_stack(stack, n_segments=n_segments)
+    df = extract_features(indices, segments)
     if df is None or len(df) == 0:
         print(f"  {region_name}: SEGMENTATION FAILED")
-        return None
+        return None, None, None
     df["adm2_name"] = region_name
     df["component_centroid_lat"] = float(polygon_geom.centroid.y)
     df["component_centroid_lon"] = float(polygon_geom.centroid.x)
+    comp_pixels = collect_pixels(stack, segments)
     print(f"  {region_name}: {len(df)} components")
-    return df
+    return df, comp_pixels, stack
 
 def visualize_region(region_name, polygon_geom, date_from="2017-01-01",
                      date_to="2017-03-31", max_cloud=20,
@@ -484,10 +494,13 @@ cells.append(code("""def attach_vector_features(components_df, conflict_gdf, pop
 cells.append(md("## 7. Process crisis zones → extract features"))
 
 cells.append(code("""all_crisis_components = []
+crisis_pixels_by_adm2 = {}
 for idx, row in crisis_admin2.iterrows():
-    df = process_admin2_region(row["adm2_name"], row["geometry"])
-    if df is not None:
+    result = process_admin2_region(row["adm2_name"], row["geometry"])
+    if result[0] is not None:
+        df, pixels, _stack = result
         all_crisis_components.append(df)
+        crisis_pixels_by_adm2[row["adm2_name"]] = pixels
 
 if all_crisis_components:
     crisis_df = pd.concat(all_crisis_components, ignore_index=True)
@@ -553,10 +566,13 @@ print(f"Crisis centroid shape: {crisis_centroid.shape}")
 cells.append(md("## 8. Process test admin2 regions (same pipeline)"))
 
 cells.append(code("""all_test_components = []
+test_pixels_by_adm2 = {}
 for idx, row in sampled_test.iterrows():
-    df = process_admin2_region(row["adm2_name"], row["geometry"])
-    if df is not None:
+    result = process_admin2_region(row["adm2_name"], row["geometry"])
+    if result[0] is not None:
+        df, pixels, _stack = result
         all_test_components.append(df)
+        test_pixels_by_adm2[row["adm2_name"]] = pixels
 
 if all_test_components:
     test_df = pd.concat(all_test_components, ignore_index=True)
@@ -586,45 +602,132 @@ test_clean["adm2_name"] = test_df.loc[test_clean.index, "adm2_name"].values
 """))
 
 # =========================================================================
-# CELL 16: SIMILARITY
+# CELL 16: BUILD CRISIS PIXEL DISTRIBUTION
 # =========================================================================
-cells.append(code("""test_scaled = crisis_scaler.transform(test_clean[crisis_feature_cols])
-similarities = cosine_similarity(test_scaled, crisis_centroid).flatten()
-test_clean["crisis_similarity"] = similarities
+cells.append(md("## 9. Pixel-level similarity within connected components"))
 
-print(f"Similarity statistics:")
-print(f"  Min:    {similarities.min():.4f}")
-print(f"  Max:    {similarities.max():.4f}")
-print(f"  Mean:   {similarities.mean():.4f}")
-print(f"  Median: {np.median(similarities):.4f}")
+cells.append(code("""# Collect all crisis pixels into one array
+crisis_pixel_list = []
+for adm2_name, px_dict in crisis_pixels_by_adm2.items():
+    for label, pixel_arr in px_dict.items():
+        crisis_pixel_list.append(pixel_arr)
+
+if not crisis_pixel_list:
+    raise RuntimeError("No crisis pixels collected — cannot compute pixel-level similarity.")
+
+crisis_pixels = np.vstack(crisis_pixel_list)
+print(f"Crisis pixel matrix shape: {crisis_pixels.shape}")
+print(f"Bands: B02, B03, B04, B08, B11")
+
+# Per-band normalization (z-score) from crisis pixels
+pixel_mean = np.nanmean(crisis_pixels, axis=0)
+pixel_std = np.nanstd(crisis_pixels, axis=0)
+pixel_std[pixel_std < 1e-10] = 1.0  # avoid div-by-zero
+
+crisis_pixels_z = (crisis_pixels - pixel_mean) / pixel_std
+crisis_pixel_centroid = crisis_pixels_z.mean(axis=0)
+print(f"Crisis pixel centroid (5 bands): {np.round(crisis_pixel_centroid, 3)}")
+print(f"Total crisis pixels: {len(crisis_pixels)}")
 """))
 
 # =========================================================================
-# CELL 17: AGGREGATE
+# CELL 17: BUILD CRISIS COVARIANCE MATRIX
 # =========================================================================
-cells.append(code("""admin2_scores = (
+cells.append(md("## 10. Covariance matrix from feature vectors"))
+
+cells.append(code("""# Build crisis feature matrix (already scaled + NDVI-filtered)
+crisis_feat_matrix = crisis_scaler.transform(crisis_clean[crisis_feature_cols])
+crisis_feat_centroid = crisis_feat_matrix.mean(axis=0)
+
+# Compute regularized covariance
+raw_cov = np.cov(crisis_feat_matrix, rowvar=False)
+reg = 1e-6 * np.trace(raw_cov) / raw_cov.shape[0] * np.eye(raw_cov.shape[0])
+crisis_cov = raw_cov + reg
+crisis_inv_cov = np.linalg.inv(crisis_cov)
+
+print(f"Crisis feature matrix shape: {crisis_feat_matrix.shape}")
+print(f"Covariance matrix shape: {crisis_cov.shape}")
+print(f"Covariance condition number: {np.linalg.cond(crisis_cov):.1f}")
+"""))
+
+# =========================================================================
+# CELL 18: PIXEL-LEVEL SIMILARITY
+# =========================================================================
+cells.append(code("""# For each test component, compute mean pixel-level cosine similarity to crisis centroid
+from sklearn.metrics.pairwise import cosine_similarity
+
+pixel_scores = {}
+for idx, row in test_clean.iterrows():
+    adm2 = row["adm2_name"]
+    comp_label = row.get("component_label")
+    px_dict = test_pixels_by_adm2.get(adm2, {})
+    pixel_arr = px_dict.get(comp_label)
+    if pixel_arr is None or len(pixel_arr) == 0:
+        pixel_scores[idx] = 0.0
+        continue
+    # Z-score using crisis pixel statistics
+    pixel_z = (pixel_arr - pixel_mean) / pixel_std
+    # Cosine similarity each pixel vs crisis centroid → mean
+    cos_sims = cosine_similarity(pixel_z, crisis_pixel_centroid.reshape(1, -1)).flatten()
+    pixel_scores[idx] = float(np.mean(cos_sims))
+
+test_clean["pixel_similarity"] = test_clean.index.map(pixel_scores)
+print(f"Pixel similarity stats:")
+print(f"  Min: {test_clean['pixel_similarity'].min():.4f}")
+print(f"  Max: {test_clean['pixel_similarity'].max():.4f}")
+print(f"  Mean: {test_clean['pixel_similarity'].mean():.4f}")
+"""))
+
+# =========================================================================
+# CELL 19: MAHALANOBIS SIMILARITY
+# =========================================================================
+cells.append(code("""# Compute Mahalanobis distance and convert to similarity for each test component
+test_scaled = crisis_scaler.transform(test_clean[crisis_feature_cols])
+
+diffs = test_scaled - crisis_feat_centroid
+mahal_dist = np.sqrt(np.sum(diffs @ crisis_inv_cov * diffs, axis=1))
+test_clean["cov_similarity"] = np.exp(-mahal_dist)  # 0 → 1
+
+print(f"Covariance similarity stats:")
+print(f"  Min: {test_clean['cov_similarity'].min():.4f}")
+print(f"  Max: {test_clean['cov_similarity'].max():.4f}")
+print(f"  Mean: {test_clean['cov_similarity'].mean():.4f}")
+"""))
+
+# =========================================================================
+# CELL 20: COMBINE AND RANK
+# =========================================================================
+cells.append(md("## 11. Combined ranking by adm2 region"))
+
+cells.append(code("""alpha = 0.5  # weight for pixel similarity, 1-alpha for covariance similarity
+test_clean["combined_score"] = (
+    alpha * test_clean["pixel_similarity"]
+    + (1 - alpha) * test_clean["cov_similarity"]
+)
+
+admin2_scores = (
     test_clean.groupby("adm2_name")
     .agg(
-        mean_similarity=("crisis_similarity", "mean"),
-        max_similarity=("crisis_similarity", "max"),
-        n_high=("crisis_similarity", lambda x: (x > 0.7).sum()),
-        n_components=("crisis_similarity", "count"),
+        pixel_similarity=("pixel_similarity", "mean"),
+        cov_similarity=("cov_similarity", "mean"),
+        combined_score=("combined_score", "mean"),
+        n_components=("combined_score", "count"),
     )
     .reset_index()
+    .sort_values("combined_score", ascending=False)
 )
-admin2_scores["high_ratio"] = admin2_scores["n_high"] / admin2_scores["n_components"]
-admin2_scores = admin2_scores.sort_values("mean_similarity", ascending=False)
 
 print("\\nTop 10 most crisis-resembling regions:")
-print(admin2_scores.head(10)[["adm2_name", "mean_similarity", "high_ratio"]].to_string(index=False))
+cols_show = ["adm2_name", "combined_score", "pixel_similarity", "cov_similarity", "n_components"]
+print(admin2_scores.head(10)[cols_show].to_string(index=False))
 print("\\nBottom 10 least:")
-print(admin2_scores.tail(10)[["adm2_name", "mean_similarity", "high_ratio"]].to_string(index=False))
+print(admin2_scores.tail(10)[cols_show].to_string(index=False))
 """))
 
 # =========================================================================
-# CELL 18: VISUALIZE IMAGERY & SEGMENTS
+# CELL 21: VISUALIZE IMAGERY & SEGMENTS
 # =========================================================================
-cells.append(md("## 9. Visualize Sentinel-2 imagery with SLIC segments"))
+cells.append(md("## 12. Visualize Sentinel-2 imagery with SLIC segments"))
 
 cells.append(code("""# Show imagery + SLIC overlay for the top-ranked test region and one crisis region
 import matplotlib.patches as mpatches
@@ -674,7 +777,7 @@ plt.show()
 """))
 
 # =========================================================================
-# CELL 19: VALIDATE
+# CELL 22: VALIDATE
 # =========================================================================
 cells.append(code("""# --- Validate against FEWS NET 2017 ground truth ---
 def _fetch_fews_2017():
@@ -713,13 +816,13 @@ else:
 """))
 
 # =========================================================================
-# CELL 19: ROC
+# CELL 22: ROC
 # =========================================================================
 cells.append(code("""results = admin2_scores.merge(val_df, on="adm2_name")
 print(f"Validation samples: {len(results)}")
 
 y_true = results["actual_crisis_2017"].astype(int)
-y_score = results["mean_similarity"]
+y_score = results["combined_score"]
 
 if len(np.unique(y_true)) > 1:
     auc = roc_auc_score(y_true, y_score)
@@ -734,8 +837,8 @@ if len(np.unique(y_true)) > 1:
     ax1.legend(loc="lower right")
     ax1.grid(True, alpha=0.3)
 
-    crisis_scores = results[results["actual_crisis_2017"]]["mean_similarity"]
-    non_crisis_scores = results[~results["actual_crisis_2017"]]["mean_similarity"]
+    crisis_scores = results[results["actual_crisis_2017"]]["combined_score"]
+    non_crisis_scores = results[~results["actual_crisis_2017"]]["combined_score"]
     ax2.hist(crisis_scores, bins=10, alpha=0.7, label="Actual crisis (2017)", color="red")
     ax2.hist(non_crisis_scores, bins=10, alpha=0.5, label="No crisis", color="blue")
     ax2.set_xlabel("Mean similarity score")
@@ -752,17 +855,17 @@ else:
 """))
 
 # =========================================================================
-# CELL 20: MAP
+# CELL 23: MAP
 # =========================================================================
 cells.append(code("""admin2_map = gpd.GeoDataFrame(
     admin2.merge(admin2_scores, on="adm2_name", how="left"), geometry="geometry")
 
 fig, ax = plt.subplots(1, 1, figsize=(14, 12))
 admin2_map.plot(
-    column="mean_similarity", cmap="YlOrRd", legend=True, ax=ax,
+    column="combined_score", cmap="YlOrRd", legend=True, ax=ax,
     edgecolor="grey", linewidth=0.3,
     missing_kwds={"color": "lightgrey", "label": "No data"},
-    legend_kwds={"label": "Similarity to crisis centroid", "shrink": 0.6},
+    legend_kwds={"label": "Combined similarity score", "shrink": 0.6},
 )
 crisis_admin2_boundary = gpd.GeoDataFrame(crisis_admin2, geometry="geometry")
 crisis_admin2_boundary.boundary.plot(ax=ax, color="blue", linewidth=2, label="Known crisis (2016)")
@@ -774,7 +877,7 @@ plt.show()
 """))
 
 # =========================================================================
-# CELL 21: BASELINE
+# CELL 25: BASELINE
 # =========================================================================
 cells.append(code("""# --- NDVI-only baseline ---
 ndvi_only = test_clean[["ndvi_mean"]].values
@@ -806,18 +909,16 @@ else:
 """))
 
 # =========================================================================
-# CELL 22: SUMMARY
+# CELL 24: SUMMARY
 # =========================================================================
 cells.append(code("""print("=" * 95)
-print(f"{'Rank':<6} {'Admin2 Region':<25} {'Mean Sim':<10} {'High%':<8} {'Crisis 2017':<12} {'Events':<8} {'Pop':<8}")
+print(f"{'Rank':<6} {'Admin2 Region':<25} {'Combined':<10} {'Px Sim':<8} {'Cov Sim':<8} {'Crisis 2017':<12}")
 print("=" * 95)
 
-results_sorted = results.sort_values("mean_similarity", ascending=False)
+results_sorted = results.sort_values("combined_score", ascending=False)
 for i, (_, r) in enumerate(results_sorted.iterrows()):
     flag = "***" if r["actual_crisis_2017"] else ""
-    events = test_clean[test_clean["adm2_name"] == r["adm2_name"]]["conflict_events"].iloc[0] if len(test_clean) > 0 else 0
-    pop = test_clean[test_clean["adm2_name"] == r["adm2_name"]]["pop_density"].iloc[0] if len(test_clean) > 0 else 0
-    print(f"{i+1:<6} {r['adm2_name']:<25} {r['mean_similarity']:<10.4f} {r['high_ratio']:<8.2%} {flag:<12} {events:<8.0f} {pop:<8.0f}")
+    print(f"{i+1:<6} {r['adm2_name']:<25} {r['combined_score']:<10.4f} {r['pixel_similarity']:<8.4f} {r['cov_similarity']:<8.4f} {flag:<12}")
 """))
 
 # =========================================================================
