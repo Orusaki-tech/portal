@@ -132,19 +132,23 @@ cells.append(md("## 3. Download vector datasets from HDX"))
 cells.append(code("""VECTOR_DIR = PROJECT_ROOT / "vector_data"
 VECTOR_DIR.mkdir(exist_ok=True)
 
+def _fmt_sz(bs):
+    if bs > 1e6:
+        return f"{bs/1e6:.1f} MB"
+    return f"{bs/1e3:.0f} KB"
+
 def _download(url, dest, label=""):
     dest = Path(dest)
     if dest.exists():
-        mb = dest.stat().st_size / 1e6
-        print(f"  {label or dest.name}: already cached ({mb:.0f} MB)")
+        sz = dest.stat().st_size
+        print(f"  {label or dest.name}: already cached ({_fmt_sz(sz)})")
         return str(dest)
     print(f"  Downloading {label or dest.name}...", end=" ", flush=True)
     try:
         r = requests.get(url, timeout=300, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
         dest.write_bytes(r.content)
-        mb = dest.stat().st_size / 1e6
-        print(f"done ({mb:.0f} MB)")
+        print(f"done ({_fmt_sz(dest.stat().st_size)})")
     except Exception as e:
         print(f"FAILED: {e}")
         return None
@@ -154,8 +158,7 @@ def _ensure_parquet(zip_url, zip_name, parquet_name, label=""):
     # Download ZIP, extract, convert to GeoParquet. Subsequent runs load parquet directly.
     parquet_path = VECTOR_DIR / parquet_name
     if parquet_path.exists():
-        mb = parquet_path.stat().st_size / 1e6
-        print(f"  {label or parquet_name}: loaded from parquet ({mb:.0f} MB)")
+        print(f"  {label or parquet_name}: loaded from parquet ({_fmt_sz(parquet_path.stat().st_size)})")
         return str(parquet_path)
 
     zip_path = VECTOR_DIR / zip_name
@@ -168,7 +171,6 @@ def _ensure_parquet(zip_url, zip_name, parquet_name, label=""):
     with tempfile.TemporaryDirectory() as tmp:
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(tmp)
-        # Find the first vector file recursively
         vec_file = None
         for root, _dirs, files in os.walk(tmp):
             for f in files:
@@ -184,8 +186,7 @@ def _ensure_parquet(zip_url, zip_name, parquet_name, label=""):
         if gdf.crs is None:
             gdf.set_crs("EPSG:4326", inplace=True)
         gdf.to_parquet(parquet_path)
-    mb = parquet_path.stat().st_size / 1e6
-    print(f"  {label}: converted to GeoParquet ({mb:.0f} MB)")
+    print(f"  {label}: converted to GeoParquet ({_fmt_sz(parquet_path.stat().st_size)})")
     return str(parquet_path)
 
 # --- Health facilities ---
