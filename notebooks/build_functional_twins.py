@@ -369,9 +369,9 @@ health_gdf = _load_parquet(health_path)
 schools_gdf = _load_parquet(schools_path)
 roads_gdf = _load_parquet(roads_path)
 
-POP_PATH = VECTOR_DIR / "ken_ppp_2020_constrained.tif"
+POP_PATH = VECTOR_DIR / "ken_ppp_2020.tif"
 if not POP_PATH.exists():
-    pop_url = "https://data.worldpop.org/GIS/Population/Global_2000_2020/2020/KEN/ken_ppp_2020_constrained.tif"
+    pop_url = "https://data.worldpop.org/GIS/Population/Global_2000_2020/2020/KEN/ken_ppp_2020.tif"
     print("Downloading WorldPop...", flush=True)
     try:
         r = requests.get(pop_url, timeout=300, headers={"User-Agent": "Mozilla/5.0"})
