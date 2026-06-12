@@ -98,7 +98,7 @@ from shapely.geometry import shape, box, Point
 from shapely.ops import unary_union
 
 from pystac_client import Client as StacClient
-from planetary_computer import sign as pc_sign
+from planetary_computer import sign_url
 import httpx
 
 from rio_tiler.io import COGReader as Reader
@@ -281,12 +281,6 @@ def query_best_scene(polygon_geom, date_from, date_to, max_cloud=20):
     items = list(search.items())
     if not items:
         return None
-    for item in items:
-        try:
-            pc_sign(item)
-        except Exception:
-            pass
-    # Sort by cloud cover ascending (STAC already returned newest-first)
     items.sort(key=lambda x: x.properties.get("eo:cloud_cover", 999) or 999)
     return items[0]
 
@@ -295,6 +289,11 @@ def get_band_url(item, band):
     return asset.href if asset else None
 
 def read_band_clipped(band_url, geojson_geom, out_shape=None):
+    # Sign the URL just-in-time so the SAS token is fresh
+    try:
+        band_url = sign_url(band_url)
+    except Exception:
+        pass
     with Reader(band_url) as reader:
         img = reader.feature(geojson_geom, out_shape=out_shape)
         band_data = img.data[0]
