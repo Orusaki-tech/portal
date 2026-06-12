@@ -286,10 +286,8 @@ def query_best_scene(polygon_geom, date_from, date_to, max_cloud=20):
             pc_sign(item)
         except Exception:
             pass
-    items.sort(key=lambda x: (
-        x.properties.get("eo:cloud_cover", 999) or 999,
-        -(x.properties.get("datetime", "") or "")
-    ))
+    # Sort by cloud cover ascending (STAC already returned newest-first)
+    items.sort(key=lambda x: x.properties.get("eo:cloud_cover", 999) or 999)
     return items[0]
 
 def get_band_url(item, band):
