@@ -352,7 +352,7 @@ cells.append(code("""def compute_indices(stack):
     return indices
 
 
-def segment_and_extract(indices_dict, n_segments=80, compactness=10):
+def segment_and_extract(indices_dict, n_segments=40, compactness=10):
     bands_for_seg = []
     for key in ["ndvi", "ndwi", "ndbi"]:
         arr = indices_dict.get(key)
@@ -389,9 +389,9 @@ def segment_and_extract(indices_dict, n_segments=80, compactness=10):
     return pd.DataFrame(features)
 
 
-def process_admin2_region(region_name, polygon_geom, date_from="2016-04-01",
-                          date_to="2016-06-30", max_cloud=20,
-                          n_segments=80, target_pixels=(500, 500)):
+def process_admin2_region(region_name, polygon_geom, date_from="2017-01-01",
+                          date_to="2017-03-31", max_cloud=20,
+                          n_segments=40, target_pixels=(500, 500)):
     item = query_best_scene(polygon_geom, date_from, date_to, max_cloud)
     if item is None:
         print(f"  {region_name}: NO SCENE FOUND")
@@ -504,6 +504,12 @@ for c in crisis_feature_cols:
 crisis_clean = crisis_df[crisis_feature_cols].dropna()
 print(f"\\nClean crisis components: {len(crisis_clean)} (dropped {len(crisis_df) - len(crisis_clean)} NaN)")
 
+# Keep only the bottom 25% of components by NDVI — these represent true drought
+if "ndvi_mean" in crisis_clean.columns:
+    ndvi_thresh = crisis_clean["ndvi_mean"].quantile(0.25)
+    crisis_clean = crisis_clean[crisis_clean["ndvi_mean"] <= ndvi_thresh].copy()
+    print(f"After NDVI < P25 filter ({ndvi_thresh:.3f}): {len(crisis_clean)} components")
+
 if crisis_clean.empty:
     raise RuntimeError("No clean crisis components after dropping NaN.")
 
@@ -591,18 +597,26 @@ print(admin2_scores.tail(10)[["adm2_name", "mean_similarity", "high_ratio"]].to_
 # CELL 18: VALIDATE
 # =========================================================================
 cells.append(code("""# --- Validate against FEWS NET 2017 ground truth ---
-url_2017 = ("https://fdw.fews.net/api/ipcphasemap/"
-            "?country=KE&scenario=CS&collection_date=2017-07-01&format=geojson")
+def _fetch_fews_2017():
+    for scenario in ["CS", "ML"]:
+        url = (f"https://fdw.fews.net/api/ipcphasemap/"
+               f"?country=KE&scenario={scenario}&collection_date=2017-07-01&format=geojson")
+        try:
+            df = gpd.read_file(url)
+            if len(df) == 0:
+                continue
+            pc = [c for c in df.columns if "phase" in c.lower() or "ipc" in c.lower()]
+            if pc:
+                return df, pc[0]
+            print(f"  scenario={scenario}: no phase col, columns={list(df.columns)}")
+        except Exception as ex:
+            print(f"  scenario={scenario}: {ex}")
+    return None, None
 
-try:
-    fews_2017 = gpd.read_file(url_2017)
-    phase_col = [c for c in fews_2017.columns if "phase" in c.lower() or "ipc" in c.lower()]
-    if not phase_col:
-        raise KeyError("No IPC phase column found")
-    phase_col = phase_col[0]
+fews_2017, phase_col = _fetch_fews_2017()
+if fews_2017 is not None and phase_col:
     crisis_2017 = fews_2017[fews_2017[phase_col] >= 3]
     print(f"FEWS NET 2017 Phase 3+ polygons: {len(crisis_2017)}")
-
     validation = []
     for _, row in admin2.iterrows():
         overlap = crisis_2017.intersects(row["geometry"]).any()
@@ -610,8 +624,8 @@ try:
                            "actual_crisis_2017": overlap})
     val_df = pd.DataFrame(validation)
     print(f"Regions actually in crisis (2017): {val_df['actual_crisis_2017'].sum()} / {len(val_df)}")
-except Exception as e:
-    print(f"FEWS NET 2017 fetch failed: {e}")
+else:
+    print("FEWS NET 2017 unavailable — using known drought zones as ground truth.")
     val_df = pd.DataFrame({
         "adm2_name": admin2["adm2_name"],
         "actual_crisis_2017": admin2["adm1_name"].isin(crisis_zone_names),
