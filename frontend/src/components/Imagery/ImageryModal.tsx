@@ -145,13 +145,13 @@ export default function ImageryModal({
     return region ? computeBbox(region) : [37, -4, 38, 4]
   }, [region])
 
-  // TiTiler tile URLs — suppress partial preview for large/low-coverage areas
+  // TiTiler tile URLs — avoid geojson clip in URL; use MapLibre source.mask instead
   const previewTileUrl = useMemo(() => {
     if (fetchStatus !== "previewing" || !fetchResult?.preview_url || !region?.geometry) return null
     const coverageOk = coverage && coverage.coverage_pct !== null && coverage.coverage_pct >= 80
     const areaOk = coverage && coverage.area_km2 !== null && coverage.area_km2 <= 1000
     if (!coverageOk && !areaOk) return null
-    return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.preview_url)}&geojson=${encodeURIComponent(JSON.stringify(region.geometry))}&return_mask=true`
+    return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.preview_url)}`
   }, [fetchStatus, fetchResult, region, coverage])
 
   const cogTileUrl = useMemo(() => {
@@ -338,7 +338,7 @@ export default function ImageryModal({
     resetState()
   }, [open, resetMap, resetState])
 
-  const syncLayer = useCallback((m: maplibregl.Map, tileUrl: string | null) => {
+  const syncLayer = useCallback((m: maplibregl.Map, tileUrl: string | null, geometry: GeoJSON.Geometry | null) => {
     const layerId = "imagery-tiles-layer"
     const sourceId = "imagery-tiles"
     if (m.getLayer(layerId)) {
@@ -346,7 +346,7 @@ export default function ImageryModal({
       m.removeSource(sourceId)
     }
     if (tileUrl) {
-      m.addSource(sourceId, { type: "raster", tiles: [tileUrl], tileSize: 256 })
+      m.addSource(sourceId, { type: "raster", tiles: [tileUrl], tileSize: 256, mask: geometry ?? undefined } as any)
       m.addLayer({ id: layerId, type: "raster", source: sourceId })
     }
   }, [])
@@ -392,7 +392,7 @@ export default function ImageryModal({
       }
 
       if (activeTileUrl) {
-        syncLayer(m, activeTileUrl)
+        syncLayer(m, activeTileUrl, region?.geometry ?? null)
       }
 
       m.fitBounds([[regionBbox[0], regionBbox[1]], [regionBbox[2], regionBbox[3]]], { padding: 40 })
@@ -420,8 +420,8 @@ export default function ImageryModal({
   useEffect(() => {
     const m = mapRef.current
     if (!m || !mapReady.current) return
-    syncLayer(m, activeTileUrl)
-  }, [activeTileUrl, syncLayer])
+    syncLayer(m, activeTileUrl, region?.geometry ?? null)
+  }, [activeTileUrl, syncLayer, region?.geometry])
 
   // Resize map when layout changes (coverage loads/unloads, fetch status changes)
   useEffect(() => {
