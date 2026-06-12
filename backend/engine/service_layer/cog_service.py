@@ -15,6 +15,7 @@ requests are instant.
 
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -23,6 +24,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.engine.service_layer.preprocessing import build_pipeline as _build_pp
+
+logger = logging.getLogger(__name__)
 
 from shapely.geometry import mapping, shape
 
@@ -863,6 +866,7 @@ def generate_clipped_cog_background(
 
     def run():
         try:
+            logger.info("COG generation started: job_hash=%s source_id=%s scenes=%s", job_hash, source_id, date_from)
             result = _generate_clipped_cog_sync(
                 source_id, geojson, buffer_meters,
                 date_from, date_to, max_cloud_cover,
@@ -870,7 +874,9 @@ def generate_clipped_cog_background(
                 preprocessing_opts=preprocessing_opts,
             )
             _complete_job(job_hash, result)
+            logger.info("COG generation complete: job_hash=%s", job_hash)
         except Exception as e:
+            logger.exception("COG generation failed: job_hash=%s", job_hash)
             _fail_job(job_hash, str(e))
 
     _submit_job(job_hash)
@@ -919,6 +925,7 @@ def _generate_clipped_cog_sync(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         if source_type == "stac":
+            logger.info("Querying STAC scenes: source_id=%s", source_id)
             scenes = _query_stac_scenes(
                 source_id, geojson, buffer_meters,
                 date_from, date_to, max_cloud_cover,
@@ -926,6 +933,8 @@ def _generate_clipped_cog_sync(
             if not scenes:
                 from backend.engine.service_layer.exceptions import NoScenesFoundError
                 raise NoScenesFoundError()
+
+            logger.info("Found %d scenes for job_hash=%s", len(scenes), job_hash)
 
             covered, coverage_pct = _check_scene_coverage(scenes, poly)
             if not covered and coverage_pct is not None and coverage_pct < 80:
@@ -935,6 +944,7 @@ def _generate_clipped_cog_sync(
                     f"Try expanding the date range or raising the cloud cover limit."
                 )
 
+            logger.info("Downloading %d scenes to tmpdir", len(scenes))
             inputs = [acquire_local_path(s, tmpdir) for s in scenes]
 
             # --- Preprocessing pipeline ---
@@ -984,11 +994,13 @@ def _generate_clipped_cog_sync(
                 inputs = pipeline.batch_process(inputs, scenes, all_aux_paths, tmpdir)
             # --- End preprocessing ---
 
+            logger.info("Building VRT mosaic from %d inputs", len(inputs))
             if len(inputs) == 1:
                 input_path = inputs[0]
             else:
                 input_path = _build_vrt_mosaic(inputs, tmpdir)
 
+            logger.info("Clipping COG to polygon: job_hash=%s", job_hash)
             cog_path, size_bytes = _generate_clipped_cog(input_path, geojson, buffer_meters, tmpdir)
 
             scene_ids = [s.id for s in scenes]
