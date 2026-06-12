@@ -474,12 +474,20 @@ cells.append(code("""if len(crisis_df) > 0:
 # =========================================================================
 # CELL 13: CRISIS CENTROID
 # =========================================================================
-cells.append(code("""# Select feature columns (spectral + vector)
-crisis_feature_cols = [c for c in crisis_df.columns
-                       if (c.endswith("_mean") or c.endswith("_std"))
-                       and c != "area_km2_approx"]
-crisis_feature_cols += ["area_km2_approx", "pixel_count",
-                        "conflict_events", "pop_density", "conflict_density"]
+cells.append(code("""if crisis_df.empty:
+    raise RuntimeError(
+        "crisis_df is empty — no crisis components were extracted. "
+        "Check STAC availability for the crisis zones or the cloud cover filter."
+    )
+
+candidate = [c for c in crisis_df.columns
+             if (c.endswith("_mean") or c.endswith("_std"))
+             and c != "area_km2_approx"]
+extra = [c for c in ["area_km2_approx", "pixel_count",
+                      "conflict_events", "pop_density", "conflict_density"]
+         if c in crisis_df.columns]
+
+crisis_feature_cols = candidate + extra
 
 print(f"Feature columns ({len(crisis_feature_cols)}):")
 for c in crisis_feature_cols:
@@ -487,6 +495,9 @@ for c in crisis_feature_cols:
 
 crisis_clean = crisis_df[crisis_feature_cols].dropna()
 print(f"\\nClean crisis components: {len(crisis_clean)} (dropped {len(crisis_df) - len(crisis_clean)} NaN)")
+
+if crisis_clean.empty:
+    raise RuntimeError("No clean crisis components after dropping NaN.")
 
 crisis_scaler = StandardScaler()
 crisis_scaled = crisis_scaler.fit_transform(crisis_clean)
@@ -520,7 +531,12 @@ cells.append(code("""if len(test_df) > 0:
     test_df = attach_vector_features(test_df, conflict_gdf, pop_cache)
     print(f"\\nAfter vector attachment: {len(test_df)} components")
 
-test_clean = test_df[crisis_feature_cols].dropna()
+# Only select columns that actually exist
+existing = [c for c in crisis_feature_cols if c in test_df.columns]
+if len(existing) < 3:
+    raise RuntimeError(f"Too few feature columns in test_df: {existing}")
+
+test_clean = test_df[existing].dropna()
 print(f"Clean test components: {len(test_clean)} (dropped {len(test_df) - len(test_clean)} NaN)")
 
 test_clean = test_clean.copy()
