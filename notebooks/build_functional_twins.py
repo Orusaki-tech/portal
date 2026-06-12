@@ -105,8 +105,7 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 KENYA_BBOX = [33.5, -5.0, 42.0, 5.0]
 DATE_RANGE = "2023-01-01/2023-12-31"
 MAX_CLOUD = 20
-TARGET_RES_M = 100         # target resolution in meters
-MAX_SCENES = 60            # max Sentinel-2 scenes to process
+MAX_SCENES = 60
 
 # --- City CBD coordinates ---
 CITIES = {
@@ -284,7 +283,7 @@ def process_stac_tile(item, admin_gdf, health_gdf, schools_gdf, roads_gdf, pop_s
             if len(vals):
                 r[f"{name}_mean"] = float(np.mean(vals))
                 r[f"{name}_std"] = float(np.std(vals))
-        r["area_km2"] = px * (TARGET_RES_M ** 2) / 1e6
+        r["area_km2"] = px * (abs(src_tfm[0]) ** 2) / 1e6
         rows.append(r)
 
         ys, xs = np.where(mask)
