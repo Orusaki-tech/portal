@@ -124,6 +124,23 @@ export default function ImageryModal({
   const activeSource = allSources.find((s) => s.id === activeSourceId) || selectedSource
   const isCommercial = ["planet", "maxar", "airbus", "blacksky"].includes(activeSource.id)
 
+  const baseTileUrl = useMemo(() => {
+    const url = activeSource.tileUrl || OSM_TILES
+    return url
+  }, [activeSource])
+
+  const invertedMask = useMemo(() => {
+    if (!feature?.geometry) return null
+    if (feature.geometry.type !== "Polygon" && feature.geometry.type !== "MultiPolygon") return null
+    const bbox = computeBbox(feature)
+    const [mx, my, Mx, My] = bbox
+    const padLon = Math.max((Mx - mx) * 0.2, 0.5)
+    const padLat = Math.max((My - my) * 0.2, 0.5)
+    const outer = turf.bboxPolygon([mx - padLon, my - padLat, Mx + padLon, My + padLat])
+    const diff = turf.difference({ type: "FeatureCollection", features: [outer, feature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>] })
+    return diff
+  }, [feature])
+
   const buffered = useMemo(() => {
     if (!open || buffer <= 0 || !feature?.geometry) return null
     try {
@@ -310,6 +327,28 @@ export default function ImageryModal({
   }, [])
 
   // Map management
+  const syncBaseLayer = useCallback((m: maplibregl.Map, url: string) => {
+    if (m.getLayer("base-tiles-layer")) {
+      m.removeLayer("base-tiles-layer")
+      m.removeSource("base-tiles")
+    }
+    if (m.getLayer("tile-mask-layer")) {
+      m.removeLayer("tile-mask-layer")
+      m.removeSource("tile-mask")
+    }
+    m.addSource("base-tiles", { type: "raster", tiles: [url], tileSize: 256 })
+    m.addLayer({ id: "base-tiles-layer", type: "raster", source: "base-tiles" })
+    if (invertedMask) {
+      m.addSource("tile-mask", { type: "geojson", data: invertedMask })
+      m.addLayer({
+        id: "tile-mask-layer",
+        type: "fill",
+        source: "tile-mask",
+        paint: { "fill-color": "#ffffff", "fill-opacity": 1 },
+      })
+    }
+  }, [invertedMask])
+
   const resetMap = useCallback(() => {
     if (mapRef.current) {
       mapRef.current.remove()
@@ -334,6 +373,9 @@ export default function ImageryModal({
       m.removeLayer(layerId)
       m.removeSource(sourceId)
     }
+    if (m.getLayer("tile-mask-layer")) {
+      m.setLayoutProperty("tile-mask-layer", "visibility", tileUrl ? "none" : "visible")
+    }
     if (tileUrl) {
       m.addSource(sourceId, { type: "raster", tiles: [tileUrl], tileSize: 256 })
       m.addLayer({ id: layerId, type: "raster", source: sourceId })
@@ -353,8 +395,18 @@ export default function ImageryModal({
     })
 
     m.on("load", () => {
-      m.addSource("base-tiles", { type: "raster", tiles: [OSM_TILES], tileSize: 256 })
+      m.addSource("base-tiles", { type: "raster", tiles: [baseTileUrl], tileSize: 256 })
       m.addLayer({ id: "base-tiles-layer", type: "raster", source: "base-tiles" })
+
+      if (invertedMask) {
+        m.addSource("tile-mask", { type: "geojson", data: invertedMask })
+        m.addLayer({
+          id: "tile-mask-layer",
+          type: "fill",
+          source: "tile-mask",
+          paint: { "fill-color": "#ffffff", "fill-opacity": 1 },
+        })
+      }
 
       m.addSource("selected-polygon", { type: "geojson", data: feature })
       m.addLayer({
@@ -398,7 +450,14 @@ export default function ImageryModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  // Sync tile layer when URL changes
+  // Sync base satellite layer when source changes
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady.current) return
+    syncBaseLayer(m, baseTileUrl)
+  }, [baseTileUrl, syncBaseLayer])
+
+  // Sync processed tile layer when preview/COG URL changes
   useEffect(() => {
     const m = mapRef.current
     if (!m || !mapReady.current) return
@@ -604,46 +663,63 @@ export default function ImageryModal({
             </select>
           </div>
 
-          {/* Coverage estimate section — always visible */}
-          <div className="flex items-center gap-2">
-            {coverageLoading && !coverage ? (
-              <span className="text-xs text-gray-400">Checking coverage...</span>
-            ) : coverage ? (
-              <div className="flex items-center gap-2 text-xs">
-                <span className={
-                  coverage.coverage_pct !== null
-                    ? coverage.coverage_pct >= 80
-                      ? "text-green-600"
-                      : coverage.coverage_pct >= 50
-                        ? "text-amber-600"
-                        : "text-red-600"
-                    : "text-gray-400"
-                }>
-                  {coverage.scene_count} scene{coverage.scene_count !== 1 ? "s" : ""}
-                  {coverage.coverage_pct !== null && <> · {coverage.coverage_pct}% coverage</>}
-                </span>
-                {coverage.cloud_cover_avg !== null && (
-                  <span className="text-gray-400">· {coverage.cloud_cover_avg}% cloud avg</span>
-                )}
+          {/* Coverage card */}
+          {coverageLoading && !coverage ? (
+            <div className="w-full rounded border border-gray-200 bg-gray-50 px-3 py-2">
+              <span className="text-xs text-gray-400">Checking coverage for your filters...</span>
+            </div>
+          ) : coverage ? (
+            <div className={`w-full rounded border px-3 py-2 ${coverage.coverage_pct !== null && coverage.coverage_pct >= 80 ? "border-green-200 bg-green-50" : coverage.coverage_pct !== null && coverage.coverage_pct >= 50 ? "border-amber-200 bg-amber-50" : "border-red-200 bg-red-50"}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-700">Coverage Estimate</span>
+                <button
+                  onClick={handleCheckCoverage}
+                  disabled={coverageLoading}
+                  className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[10px] text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {coverageLoading ? "..." : "Refresh"}
+                </button>
+              </div>
+              {coverage.coverage_pct !== null && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-200">
+                    <div
+                      className={`h-full rounded-full transition-all ${coverage.coverage_pct >= 80 ? "bg-green-500" : coverage.coverage_pct >= 50 ? "bg-amber-500" : "bg-red-500"}`}
+                      style={{ width: `${coverage.coverage_pct}%` }}
+                    />
+                  </div>
+                  <span className={`text-xs font-medium ${coverage.coverage_pct >= 80 ? "text-green-700" : coverage.coverage_pct >= 50 ? "text-amber-700" : "text-red-700"}`}>
+                    {coverage.coverage_pct}%
+                  </span>
+                </div>
+              )}
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
+                <span>{coverage.scene_count} scene{coverage.scene_count !== 1 ? "s" : ""}</span>
+                {coverage.cloud_cover_avg !== null && <span>· {coverage.cloud_cover_avg}% cloud avg</span>}
+                {coverage.resolution !== null && coverage.resolution > 0 && <span>· {coverage.resolution}m</span>}
+                {coverage.area_km2 !== null && coverage.area_km2 > 0 && <span>· {coverage.area_km2.toFixed(2)} km²</span>}
                 {coverage.datetime_from && (
-                  <span className="text-gray-400">
+                  <span>
                     · {coverage.datetime_from.slice(0, 10)}
                     {coverage.datetime_to && coverage.datetime_to !== coverage.datetime_from && <> to {coverage.datetime_to.slice(0, 10)}</>}
                   </span>
                 )}
-                {coverage.area_km2 && (
-                  <span className="text-gray-400">· {coverage.area_km2.toFixed(2)} km²</span>
+              </div>
+              <div className="mt-1 text-[11px]">
+                {coverage.coverage_pct !== null && coverage.coverage_pct >= 80 ? (
+                  <span className="text-green-600">Good coverage — Fetch will produce representative results</span>
+                ) : coverage.coverage_pct !== null && coverage.coverage_pct >= 50 ? (
+                  <span className="text-amber-600">Moderate coverage — expanding date range or lowering cloud cover filter may help</span>
+                ) : (
+                  <span className="text-red-600">Low coverage — try expanding the date range or raising the cloud cover limit</span>
                 )}
               </div>
-            ) : null}
-            <button
-              onClick={handleCheckCoverage}
-              disabled={coverageLoading}
-              className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-            >
-              {coverageLoading ? "..." : "Refresh estimate"}
-            </button>
-          </div>
+            </div>
+          ) : (
+            <div className="w-full rounded border border-gray-200 bg-gray-50 px-3 py-2">
+              <span className="text-xs text-gray-400">Select a date range and check coverage to see availability</span>
+            </div>
+          )}
 
           <button
             onClick={handleFetch}
@@ -689,35 +765,14 @@ export default function ImageryModal({
               </span>
             )}
             {fetchStatus === "idle" && !coverage && (
-              <span className="text-gray-400">Configure filters and check coverage, then fetch</span>
+              <span className="text-gray-400">Select a date range and check coverage above, then fetch</span>
             )}
             {fetchStatus === "idle" && coverage && (
               <span className="text-gray-400">
                 {coverage.coverage_pct !== null && coverage.coverage_pct >= 80
-                  ? "Good coverage — click Fetch to generate clipped COG"
-                  : coverage.coverage_pct !== null && coverage.coverage_pct >= 50
-                    ? "Moderate coverage — consider expanding date range for better results"
-                    : "Low coverage — expanding date range or raising cloud cover may help"}
+                  ? "Coverage looks good — ready to fetch"
+                  : "Coverage is low — see suggestions above"}
               </span>
-            )}
-            {fetchStatus === "idle" && coverage && coverage.coverage_pct !== null && coverage.coverage_pct < 50 && (
-              <div className="flex items-center gap-1 ml-2">
-                <button
-                  onClick={() => setMaxCloudCover((c) => Math.min(100, c + 25))}
-                  className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
-                >
-                  Raise cloud cover
-                </button>
-                <button
-                  onClick={() => {
-                    setDateFrom(new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10))
-                    setDateTo(todayISO())
-                  }}
-                  className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
-                >
-                  Expand dates (6mo)
-                </button>
-              </div>
             )}
                 {fetchResult?.preprocessing_applied && fetchResult.preprocessing_applied.length > 0 && (
                   <span className="ml-2 text-purple-500">
