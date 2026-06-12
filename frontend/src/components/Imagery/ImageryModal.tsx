@@ -676,6 +676,121 @@ export default function ImageryModal({
                 {fetchResult?.datetime_from && <> &middot; {fetchResult.datetime_from.slice(0, 10)}</>}
                 {fetchResult?.datetime_to && fetchResult.datetime_to !== fetchResult.datetime_from && <> to {fetchResult.datetime_to.slice(0, 10)}</>}
                 {fetchResult?.resolution !== undefined && fetchResult.resolution > 0 && <> &middot; {fetchResult.resolution}m</>}
+              </span>
+            )}
+            {fetchStatus === "error" && (
+              <span className="text-red-600">{fetchError || "Failed to load imagery"}</span>
+            )}
+            {fetchStatus === "idle" && !coverage && (
+              <span className="text-gray-400">Configure filters and check coverage, then fetch</span>
+            )}
+            {fetchStatus === "idle" && coverage && (
+              <span className="text-gray-400">
+                {coverage.coverage_pct !== null && coverage.coverage_pct >= 80
+                  ? "Good coverage — click Fetch to generate clipped COG"
+                  : coverage.coverage_pct !== null && coverage.coverage_pct >= 50
+                    ? "Moderate coverage — consider expanding date range for better results"
+                    : "Low coverage — expanding date range or raising cloud cover may help"}
+              </span>
+            )}
+            {fetchStatus === "idle" && coverage && coverage.coverage_pct !== null && coverage.coverage_pct < 50 && (
+              <div className="flex items-center gap-1 ml-2">
+                <button
+                  onClick={() => setMaxCloudCover((c) => Math.min(100, c + 25))}
+                  className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
+                >
+                  Raise cloud cover
+                </button>
+                <button
+                  onClick={() => {
+                    setDateFrom(new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10))
+                    setDateTo(todayISO())
+                  }}
+                  className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
+                >
+                  Expand dates (6mo)
+                </button>
+              </div>
+            )}
+                {fetchResult?.preprocessing_applied && fetchResult.preprocessing_applied.length > 0 && (
+                  <span className="ml-2 text-purple-500">
+                    {" · "}preproc: {fetchResult.preprocessing_applied.join(", ")}
+                  </span>
+                )}
+                {fetchResult?.area_km2 && (
+                  <span className="ml-2 text-gray-400">{fetchResult.area_km2.toFixed(2)} km²</span>
+                )}
+          </div>
 
-              )
+          {/* Error action buttons */}
+          {fetchStatus === "error" && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setMaxCloudCover((c) => Math.min(100, c + 25))}
+                className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
+              >
+                Raise cloud cover
+              </button>
+              <button
+                onClick={() => {
+                  setDateFrom(threeMonthsAgo())
+                  setDateTo(todayISO())
+                }}
+                className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
+              >
+                Expand dates
+              </button>
+              <button
+                onClick={handleFetch}
+                className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800 hover:bg-blue-200"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Map */}
+        <div className="flex-1">
+          <div ref={mapContainer} className="h-full w-full" />
+        </div>
+
+        {/* Footer — export */}
+        <div className="flex items-center justify-between border-t px-6 py-3">
+          <div className="text-xs text-gray-400">
+            {fetchStatus === "ready" && fetchResult?.scene_ids && fetchResult.scene_ids.length > 0 && (
+              <span title={fetchResult.scene_ids.join(", ")}>
+                Scene{fetchResult.scene_ids.length > 1 ? "s" : ""}: {fetchResult.scene_ids.slice(0, 3).join(", ")}
+                {fetchResult.scene_ids.length > 3 && ` +${fetchResult.scene_ids.length - 3} more`}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {fetchStatus === "ready" && fetchResult?.cog_url && (
+              <button
+                onClick={downloadGeoTiff}
+                disabled={downloading !== null}
+                className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {downloading === "tif" ? "Downloading..." : "GeoTIFF"}
+              </button>
+            )}
+            <button
+              onClick={() => exportFromMap("png")}
+              className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+            >
+              PNG
+            </button>
+            <button
+              onClick={() => exportFromMap("jpg")}
+              className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+            >
+              JPEG
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
