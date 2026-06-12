@@ -29,9 +29,10 @@ steps:
           --add-cloudsql-instances $_CLOUD_SQL_INSTANCE \
           --set-env-vars "^~^DB_HOST=/cloudsql/$_CLOUD_SQL_INSTANCE~DB_NAME=realitysync~APP_ENV=production~CORS_ORIGINS=http://localhost:3000,http://localhost:8080" \
           --set-secrets "DB_USER=realitysync-db-user:latest,DB_PASSWORD=realitysync-db-password:latest" \
+          --memory 2Gi \
           --min-instances 0 \
           --max-instances 10 \
-          --timeout 5m
+          --timeout 10m
     waitFor: ["build-and-push-api"]
 
   # ── 2. TiTiler ────────────────────────────────────────────────
