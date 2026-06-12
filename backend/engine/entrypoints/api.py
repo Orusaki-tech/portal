@@ -113,6 +113,8 @@ def _resolve_user(api_key: str) -> UUID | None:
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next: Any) -> Any:
+    if request.method == "OPTIONS":
+        return await call_next(request)
     if any(
         request.url.path.startswith(p)
         for p in ("/health", "/docs", "/openapi", "/tiles", "/api/auth")

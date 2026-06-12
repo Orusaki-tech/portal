@@ -124,22 +124,7 @@ export default function ImageryModal({
   const activeSource = allSources.find((s) => s.id === activeSourceId) || selectedSource
   const isCommercial = ["planet", "maxar", "airbus", "blacksky"].includes(activeSource.id)
 
-  const baseTileUrl = useMemo(() => {
-    const url = activeSource.tileUrl || OSM_TILES
-    return url
-  }, [activeSource])
-
-  const invertedMask = useMemo(() => {
-    if (!feature?.geometry) return null
-    if (feature.geometry.type !== "Polygon" && feature.geometry.type !== "MultiPolygon") return null
-    const bbox = computeBbox(feature)
-    const [mx, my, Mx, My] = bbox
-    const padLon = Math.max((Mx - mx) * 0.2, 0.5)
-    const padLat = Math.max((My - my) * 0.2, 0.5)
-    const outer = turf.bboxPolygon([mx - padLon, my - padLat, Mx + padLon, My + padLat])
-    const diff = turf.difference({ type: "FeatureCollection", features: [outer, feature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>] })
-    return diff
-  }, [feature])
+  const baseTileUrl = OSM_TILES
 
   const buffered = useMemo(() => {
     if (!open || buffer <= 0 || !feature?.geometry) return null
@@ -166,7 +151,7 @@ export default function ImageryModal({
     const coverageOk = coverage && coverage.coverage_pct !== null && coverage.coverage_pct >= 80
     const areaOk = coverage && coverage.area_km2 !== null && coverage.area_km2 <= 1000
     if (!coverageOk && !areaOk) return null
-    return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.preview_url)}&geojson=${encodeURIComponent(JSON.stringify(region.geometry))}`
+    return `/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?url=${encodeURIComponent(fetchResult.preview_url)}&geojson=${encodeURIComponent(JSON.stringify(region.geometry))}&return_mask=true`
   }, [fetchStatus, fetchResult, region, coverage])
 
   const cogTileUrl = useMemo(() => {
@@ -332,22 +317,9 @@ export default function ImageryModal({
       m.removeLayer("base-tiles-layer")
       m.removeSource("base-tiles")
     }
-    if (m.getLayer("tile-mask-layer")) {
-      m.removeLayer("tile-mask-layer")
-      m.removeSource("tile-mask")
-    }
     m.addSource("base-tiles", { type: "raster", tiles: [url], tileSize: 256 })
     m.addLayer({ id: "base-tiles-layer", type: "raster", source: "base-tiles" })
-    if (invertedMask) {
-      m.addSource("tile-mask", { type: "geojson", data: invertedMask })
-      m.addLayer({
-        id: "tile-mask-layer",
-        type: "fill",
-        source: "tile-mask",
-        paint: { "fill-color": "#ffffff", "fill-opacity": 1 },
-      })
-    }
-  }, [invertedMask])
+  }, [])
 
   const resetMap = useCallback(() => {
     if (mapRef.current) {
@@ -373,9 +345,6 @@ export default function ImageryModal({
       m.removeLayer(layerId)
       m.removeSource(sourceId)
     }
-    if (m.getLayer("tile-mask-layer")) {
-      m.setLayoutProperty("tile-mask-layer", "visibility", tileUrl ? "none" : "visible")
-    }
     if (tileUrl) {
       m.addSource(sourceId, { type: "raster", tiles: [tileUrl], tileSize: 256 })
       m.addLayer({ id: layerId, type: "raster", source: sourceId })
@@ -397,16 +366,6 @@ export default function ImageryModal({
     m.on("load", () => {
       m.addSource("base-tiles", { type: "raster", tiles: [baseTileUrl], tileSize: 256 })
       m.addLayer({ id: "base-tiles-layer", type: "raster", source: "base-tiles" })
-
-      if (invertedMask) {
-        m.addSource("tile-mask", { type: "geojson", data: invertedMask })
-        m.addLayer({
-          id: "tile-mask-layer",
-          type: "fill",
-          source: "tile-mask",
-          paint: { "fill-color": "#ffffff", "fill-opacity": 1 },
-        })
-      }
 
       m.addSource("selected-polygon", { type: "geojson", data: feature })
       m.addLayer({
@@ -463,6 +422,13 @@ export default function ImageryModal({
     if (!m || !mapReady.current) return
     syncLayer(m, activeTileUrl)
   }, [activeTileUrl, syncLayer])
+
+  // Resize map when layout changes (coverage loads/unloads, fetch status changes)
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady.current) return
+    requestAnimationFrame(() => m.resize())
+  }, [coverage, fetchStatus])
 
   // Update buffer outline
   useEffect(() => {
@@ -524,321 +490,186 @@ export default function ImageryModal({
   if (!open) return null
 
   const btnDisabled = fetchStatus === "previewing" || fetchStatus === "processing"
+  const fetchLabel = fetchStatus === "previewing" || fetchStatus === "processing" ? "Fetching..." : "Fetch Satellite Data"
+
+  const coverPct = coverage?.coverage_pct ?? null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="mx-4 flex h-[90vh] w-full max-w-5xl flex-col rounded-lg bg-white shadow-xl">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b px-6 py-4">
-          <div>
-            <h2 className="text-lg font-semibold">{name}</h2>
-            <p className="text-xs text-gray-500">
-              {level.toUpperCase()} &mdash; Buffer: {buffer}m
-              {fetchResult?.source_type && (
-                <span className="ml-2 text-blue-500">[{fetchResult.source_type}]</span>
-              )}
-            </p>
-          </div>
-          <button onClick={onClose} className="rounded p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Controls bar */}
-        <div className="flex flex-wrap items-center gap-4 border-b px-6 py-3">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-gray-600">Buffer:</label>
-            <input
-              type="range"
-              min={0}
-              max={5000}
-              step={100}
-              value={buffer}
-              onChange={(e) => setBuffer(Number(e.target.value))}
-              className="w-24"
-            />
-            <span className="w-14 text-right text-xs text-gray-500">{buffer}m</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-gray-600">From:</label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="rounded border border-gray-300 px-2 py-1 text-xs"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-gray-600">To:</label>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="rounded border border-gray-300 px-2 py-1 text-xs"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-gray-600">Cloud:</label>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={maxCloudCover}
-              onChange={(e) => setMaxCloudCover(Number(e.target.value))}
-              className="w-20"
-            />
-            <span className="w-10 text-right text-xs text-gray-500">{maxCloudCover}%</span>
-          </div>
-
-          {/* Preprocessing toggles */}
-          <details className="group">
-            <summary className="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-700">
-              Preprocessing {preprocEnabled ? "🟢" : "⚪"}
-            </summary>
-            <div className="absolute z-10 mt-1 rounded border bg-white p-3 shadow-lg">
-              <label className="flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={preprocEnabled} onChange={(e) => setPreprocEnabled(e.target.checked)} />
-                Enable preprocessing
-              </label>
-              {preprocEnabled && (
-                <div className="mt-2 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-gray-600">Cloud mask:</label>
-                    <select
-                      value={cloudMaskMethod}
-                      onChange={(e) => setCloudMaskMethod(e.target.value as typeof cloudMaskMethod)}
-                      className="rounded border border-gray-300 px-2 py-0.5 text-xs"
-                    >
-                      <option value="scl">SCL (Sentinel-2)</option>
-                      <option value="qa_pixel">QA_PIXEL (Landsat)</option>
-                      <option value="s2cloudless">s2cloudless (ML)</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={speckleFilter}
-                      onChange={(e) => setSpeckleFilter(e.target.checked)}
-                      id="speckle"
-                    />
-                    <label htmlFor="speckle" className="text-xs text-gray-600">SAR speckle filter</label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-gray-600">Pan-sharpen:</label>
-                    <select
-                      value={typeof pansharpenAlgo === "string" ? pansharpenAlgo : "off"}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        setPansharpenAlgo(v === "off" ? false : v as "brovey" | "pca" | "ihs")
-                      }}
-                      className="rounded border border-gray-300 px-2 py-0.5 text-xs"
-                    >
-                      <option value="off">Off</option>
-                      <option value="brovey">Brovey</option>
-                      <option value="pca">PCA</option>
-                      <option value="ihs">IHS</option>
-                    </select>
-                  </div>
-                </div>
-              )}
+        {/* Header row: title + coverage + action */}
+        <div className="flex shrink-0 items-center justify-between border-b px-6 py-3">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold">{name}</h2>
+              <p className="text-[11px] text-gray-400">{level.toUpperCase()} &middot; {activeSource.label}</p>
             </div>
-          </details>
-
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-gray-600">Source:</label>
-            <select
-              value={activeSourceId}
-              onChange={(e) => handleSourceChange(e.target.value)}
-              className="rounded border border-gray-300 px-2 py-1 text-sm"
-            >
-              {allSources.map((s) => (
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Coverage card */}
-          {coverageLoading && !coverage ? (
-            <div className="w-full rounded border border-gray-200 bg-gray-50 px-3 py-2">
-              <span className="text-xs text-gray-400">Checking coverage for your filters...</span>
-            </div>
-          ) : coverage ? (
-            <div className={`w-full rounded border px-3 py-2 ${coverage.coverage_pct !== null && coverage.coverage_pct >= 80 ? "border-green-200 bg-green-50" : coverage.coverage_pct !== null && coverage.coverage_pct >= 50 ? "border-amber-200 bg-amber-50" : "border-red-200 bg-red-50"}`}>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-700">Coverage Estimate</span>
+            {coverage && (
+              <div className="flex shrink-0 items-center gap-2 rounded-full bg-gray-50 px-3 py-1 text-xs">
+                <span className={coverPct !== null ? (coverPct >= 80 ? "text-green-600" : coverPct >= 50 ? "text-amber-600" : "text-red-600") : "text-gray-400"}>
+                  {coverPct !== null ? `${coverPct}%` : "—"}
+                </span>
+                <span className="text-gray-400">&middot; {coverage.scene_count} scene{coverage.scene_count !== 1 ? "s" : ""}</span>
+                {coverage.cloud_cover_avg !== null && <span className="text-gray-400">&middot; {coverage.cloud_cover_avg}% cloud</span>}
+                {coverage.area_km2 !== null && coverage.area_km2 > 0 && <span className="text-gray-400">&middot; {coverage.area_km2.toFixed(1)} km²</span>}
                 <button
                   onClick={handleCheckCoverage}
                   disabled={coverageLoading}
-                  className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[10px] text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+                  className="ml-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                  title="Refresh"
                 >
-                  {coverageLoading ? "..." : "Refresh"}
+                  {coverageLoading ? "..." : "↻"}
                 </button>
               </div>
-              {coverage.coverage_pct !== null && (
-                <div className="mt-1.5 flex items-center gap-2">
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-200">
-                    <div
-                      className={`h-full rounded-full transition-all ${coverage.coverage_pct >= 80 ? "bg-green-500" : coverage.coverage_pct >= 50 ? "bg-amber-500" : "bg-red-500"}`}
-                      style={{ width: `${coverage.coverage_pct}%` }}
-                    />
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <details className="group relative">
+              <summary className="cursor-pointer rounded border border-gray-200 px-2.5 py-1 text-[11px] text-gray-500 hover:bg-gray-50">
+                Filters
+              </summary>
+              <div className="absolute right-0 z-10 mt-1 w-72 rounded border bg-white p-3 shadow-lg">
+                <div className="space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <label className="w-12 text-[11px] text-gray-500">Buffer</label>
+                    <input type="range" min={0} max={5000} step={100} value={buffer} onChange={(e) => setBuffer(Number(e.target.value))} className="flex-1" />
+                    <span className="w-12 text-right text-[11px] text-gray-400">{buffer}m</span>
                   </div>
-                  <span className={`text-xs font-medium ${coverage.coverage_pct >= 80 ? "text-green-700" : coverage.coverage_pct >= 50 ? "text-amber-700" : "text-red-700"}`}>
-                    {coverage.coverage_pct}%
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <label className="w-12 text-[11px] text-gray-500">From</label>
+                    <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="flex-1 rounded border border-gray-300 px-2 py-1 text-[11px]" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="w-12 text-[11px] text-gray-500">To</label>
+                    <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="flex-1 rounded border border-gray-300 px-2 py-1 text-[11px]" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="w-12 text-[11px] text-gray-500">Cloud</label>
+                    <input type="range" min={0} max={100} step={1} value={maxCloudCover} onChange={(e) => setMaxCloudCover(Number(e.target.value))} className="flex-1" />
+                    <span className="w-10 text-right text-[11px] text-gray-400">{maxCloudCover}%</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="w-12 text-[11px] text-gray-500">Source</label>
+                    <select value={activeSourceId} onChange={(e) => handleSourceChange(e.target.value)} className="flex-1 rounded border border-gray-300 px-2 py-1 text-[11px]">
+                      {allSources.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                  </div>
+                  <details className="group">
+                    <summary className="cursor-pointer text-[11px] text-gray-500 hover:text-gray-700">
+                      Preprocessing {preprocEnabled ? "🟢" : "⚪"}
+                    </summary>
+                    <div className="mt-1.5 space-y-1.5 pl-2">
+                      <label className="flex items-center gap-1.5 text-[11px]">
+                        <input type="checkbox" checked={preprocEnabled} onChange={(e) => setPreprocEnabled(e.target.checked)} />
+                        Enable
+                      </label>
+                      {preprocEnabled && <>
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-[11px] text-gray-500">Cloud mask:</label>
+                          <select value={cloudMaskMethod} onChange={(e) => setCloudMaskMethod(e.target.value as typeof cloudMaskMethod)} className="flex-1 rounded border border-gray-300 px-2 py-0.5 text-[11px]">
+                            <option value="scl">SCL</option>
+                            <option value="qa_pixel">QA_PIXEL</option>
+                            <option value="s2cloudless">s2cloudless</option>
+                          </select>
+                        </div>
+                        <label className="flex items-center gap-1.5 text-[11px]">
+                          <input type="checkbox" checked={speckleFilter} onChange={(e) => setSpeckleFilter(e.target.checked)} />
+                          SAR speckle filter
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-[11px] text-gray-500">Pan-sharpen:</label>
+                          <select value={typeof pansharpenAlgo === "string" ? pansharpenAlgo : "off"} onChange={(e) => setPansharpenAlgo(e.target.value === "off" ? false : e.target.value as "brovey" | "pca" | "ihs")} className="flex-1 rounded border border-gray-300 px-2 py-0.5 text-[11px]">
+                            <option value="off">Off</option>
+                            <option value="brovey">Brovey</option>
+                            <option value="pca">PCA</option>
+                            <option value="ihs">IHS</option>
+                          </select>
+                        </div>
+                      </>}
+                    </div>
+                  </details>
                 </div>
-              )}
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
-                <span>{coverage.scene_count} scene{coverage.scene_count !== 1 ? "s" : ""}</span>
-                {coverage.cloud_cover_avg !== null && <span>· {coverage.cloud_cover_avg}% cloud avg</span>}
-                {coverage.resolution !== null && coverage.resolution > 0 && <span>· {coverage.resolution}m</span>}
-                {coverage.area_km2 !== null && coverage.area_km2 > 0 && <span>· {coverage.area_km2.toFixed(2)} km²</span>}
-                {coverage.datetime_from && (
-                  <span>
-                    · {coverage.datetime_from.slice(0, 10)}
-                    {coverage.datetime_to && coverage.datetime_to !== coverage.datetime_from && <> to {coverage.datetime_to.slice(0, 10)}</>}
-                  </span>
-                )}
               </div>
-              <div className="mt-1 text-[11px]">
-                {coverage.coverage_pct !== null && coverage.coverage_pct >= 80 ? (
-                  <span className="text-green-600">Good coverage — Fetch will produce representative results</span>
-                ) : coverage.coverage_pct !== null && coverage.coverage_pct >= 50 ? (
-                  <span className="text-amber-600">Moderate coverage — expanding date range or lowering cloud cover filter may help</span>
-                ) : (
-                  <span className="text-red-600">Low coverage — try expanding the date range or raising the cloud cover limit</span>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="w-full rounded border border-gray-200 bg-gray-50 px-3 py-2">
-              <span className="text-xs text-gray-400">Select a date range and check coverage to see availability</span>
-            </div>
-          )}
-
-          <button
-            onClick={handleFetch}
-            disabled={btnDisabled}
-            className="rounded bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {fetchStatus === "previewing" || fetchStatus === "processing" ? "Fetching..." : "Fetch Satellite Data"}
-          </button>
+            </details>
+            <button
+              onClick={handleFetch}
+              disabled={btnDisabled}
+              className="rounded bg-blue-600 px-4 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {fetchLabel}
+            </button>
+            <button onClick={onClose} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        {/* Status bar */}
-        <div className="flex items-center justify-between border-b px-6 py-1.5">
-          <div className="flex items-center gap-3 text-xs">
+        {/* Map area (flex-grow) with status overlay */}
+        <div className="relative flex-1 min-h-0">
+          <div ref={mapContainer} className="h-full w-full" />
+
+          {/* Status overlay (top-left of map) */}
+          <div className="pointer-events-none absolute left-3 top-3 z-10">
             {fetchStatus === "previewing" && (
-              <span className="text-blue-600">
+              <span className="inline-block rounded bg-blue-600/80 px-2 py-0.5 text-xs text-white">
                 {fetchResult?.preview_url && !previewTileUrl
-                  ? "Coverage is low — building cloud-masked mosaic instead of preview..."
+                  ? "Building cloud-masked mosaic..."
                   : fetchResult?.preview_url
-                    ? "Preview loaded — generating clipped COG..."
-                    : "Fetching images — building cloud-masked mosaic..."}
+                    ? "Generating clipped COG..."
+                    : "Fetching images..."}
               </span>
             )}
             {fetchStatus === "processing" && (
-              <span className="text-amber-600">Processing satellite imagery...</span>
+              <span className="inline-block rounded bg-amber-600/80 px-2 py-0.5 text-xs text-white">Processing...</span>
             )}
             {fetchStatus === "ready" && (
-              <span className="text-green-600">
+              <span className="inline-block rounded bg-green-600/80 px-2 py-0.5 text-xs text-white">
                 {fetchResult?.cached ? "Cached" : "Ready"}
                 {fetchResult?.scene_count !== undefined && fetchResult.scene_count > 0 && <> &middot; {fetchResult.scene_count} scene{fetchResult.scene_count > 1 ? "s" : ""}</>}
-                {fetchResult?.cloud_cover_avg !== undefined && <> &middot; {fetchResult.cloud_cover_avg}% cloud avg</>}
-                {fetchResult?.datetime_from && <> &middot; {fetchResult.datetime_from.slice(0, 10)}</>}
-                {fetchResult?.datetime_to && fetchResult.datetime_to !== fetchResult.datetime_from && <> to {fetchResult.datetime_to.slice(0, 10)}</>}
-                {fetchResult?.resolution !== undefined && fetchResult.resolution > 0 && <> &middot; {fetchResult.resolution}m</>}
               </span>
             )}
             {fetchStatus === "error" && (
-              <span className="text-red-600">
-                {fetchError?.includes("API key") ? (
-                  <>Authentication required — <button onClick={() => window.location.href = "/login"} className="underline hover:text-red-800">sign in</button> to access satellite imagery</>
-                ) : (
-                  fetchError || "Failed to load imagery"
-                )}
+              <span className="inline-block rounded bg-red-600/80 px-2 py-0.5 text-xs text-white">
+                {fetchError?.includes("API key") ? "Auth required" : fetchError || "Failed"}
               </span>
             )}
-            {fetchStatus === "idle" && !coverage && (
-              <span className="text-gray-400">Select a date range and check coverage above, then fetch</span>
-            )}
-            {fetchStatus === "idle" && coverage && (
-              <span className="text-gray-400">
-                {coverage.coverage_pct !== null && coverage.coverage_pct >= 80
-                  ? "Coverage looks good — ready to fetch"
-                  : "Coverage is low — see suggestions above"}
+            {fetchStatus === "idle" && (
+              <span className="inline-block rounded bg-gray-800/60 px-2 py-0.5 text-xs text-white">
+                {coverage
+                  ? coverPct !== null && coverPct >= 80
+                    ? "Good coverage — fetch to preview"
+                    : "Low coverage — adjust filters"
+                  : coverageLoading
+                    ? "Checking coverage..."
+                    : ""}
               </span>
             )}
-                {fetchResult?.preprocessing_applied && fetchResult.preprocessing_applied.length > 0 && (
-                  <span className="ml-2 text-purple-500">
-                    {" · "}preproc: {fetchResult.preprocessing_applied.join(", ")}
-                  </span>
-                )}
-                {fetchResult?.area_km2 && (
-                  <span className="ml-2 text-gray-400">{fetchResult.area_km2.toFixed(2)} km²</span>
-                )}
           </div>
 
-          {/* Error action buttons */}
+          {/* Error action buttons (overlay on map) */}
           {fetchStatus === "error" && (
-            <div className="flex items-center gap-2">
+            <div className="pointer-events-auto absolute bottom-3 right-3 z-10 flex gap-2">
               {fetchError?.includes("API key") ? (
                 <>
-                  <button
-                    onClick={() => { localStorage.removeItem("realitysync_api_key"); window.location.href = "/login" }}
-                    className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
-                  >
-                    Sign In
-                  </button>
-                  <button
-                    onClick={() => { localStorage.removeItem("realitysync_api_key"); localStorage.removeItem("realitysync_user"); window.location.reload() }}
-                    className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
-                  >
-                    Clear stored key
-                  </button>
+                  <button onClick={() => { localStorage.removeItem("realitysync_api_key"); window.location.href = "/login" }} className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700">Sign In</button>
+                  <button onClick={() => { localStorage.removeItem("realitysync_api_key"); localStorage.removeItem("realitysync_user"); window.location.reload() }} className="rounded border border-white/30 px-3 py-1 text-xs text-white hover:bg-white/10">Clear key</button>
                 </>
               ) : (
                 <>
-                  <button
-                    onClick={() => setMaxCloudCover((c) => Math.min(100, c + 25))}
-                    className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
-                  >
-                    Raise cloud cover
-                  </button>
-                  <button
-                    onClick={() => {
-                      setDateFrom(threeMonthsAgo())
-                      setDateTo(todayISO())
-                    }}
-                    className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
-                  >
-                    Expand dates
-                  </button>
-                  <button
-                    onClick={handleFetch}
-                    className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800 hover:bg-blue-200"
-                  >
-                    Retry
-                  </button>
+                  <button onClick={() => setMaxCloudCover((c) => Math.min(100, c + 25))} className="rounded bg-amber-500/80 px-2 py-1 text-xs text-white hover:bg-amber-600">Raise cloud</button>
+                  <button onClick={() => { setDateFrom(threeMonthsAgo()); setDateTo(todayISO()) }} className="rounded bg-amber-500/80 px-2 py-1 text-xs text-white hover:bg-amber-600">Expand dates</button>
+                  <button onClick={handleFetch} className="rounded bg-blue-600/80 px-2 py-1 text-xs text-white hover:bg-blue-700">Retry</button>
                 </>
               )}
             </div>
           )}
         </div>
 
-        {/* Map */}
-        <div className="flex-1">
-          <div ref={mapContainer} className="h-full w-full" />
-        </div>
-
         {/* Footer — export */}
-        <div className="flex items-center justify-between border-t px-6 py-3">
-          <div className="text-xs text-gray-400">
+        <div className="flex shrink-0 items-center justify-between border-t px-6 py-2">
+          <div className="text-[11px] text-gray-400">
             {fetchStatus === "ready" && fetchResult?.scene_ids && fetchResult.scene_ids.length > 0 && (
               <span title={fetchResult.scene_ids.join(", ")}>
                 Scene{fetchResult.scene_ids.length > 1 ? "s" : ""}: {fetchResult.scene_ids.slice(0, 3).join(", ")}
@@ -846,29 +677,14 @@ export default function ImageryModal({
               </span>
             )}
           </div>
-
           <div className="flex items-center gap-2">
             {fetchStatus === "ready" && fetchResult?.cog_url && (
-              <button
-                onClick={downloadGeoTiff}
-                disabled={downloading !== null}
-                className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {downloading === "tif" ? "Downloading..." : "GeoTIFF"}
+              <button onClick={downloadGeoTiff} disabled={downloading !== null} className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50">
+                {downloading === "tif" ? "..." : "GeoTIFF"}
               </button>
             )}
-            <button
-              onClick={() => exportFromMap("png")}
-              className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
-            >
-              PNG
-            </button>
-            <button
-              onClick={() => exportFromMap("jpg")}
-              className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
-            >
-              JPEG
-            </button>
+            <button onClick={() => exportFromMap("png")} className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">PNG</button>
+            <button onClick={() => exportFromMap("jpg")} className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">JPEG</button>
           </div>
         </div>
       </div>
