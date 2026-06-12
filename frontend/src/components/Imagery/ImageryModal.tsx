@@ -46,24 +46,30 @@ function threeMonthsAgo(): string {
   return d.toISOString().slice(0, 10)
 }
 
-async function fetchApi<T>(path: string, body: unknown): Promise<T> {
-  let apiKey: string | null = null
+function getApiKey(): string {
+  let key: string | null = null
   if (typeof window !== "undefined") {
-    apiKey = localStorage.getItem("realitysync_api_key")
-    if (!apiKey) {
+    key = localStorage.getItem("realitysync_api_key")
+    if (!key) {
       try {
         const user = JSON.parse(localStorage.getItem("realitysync_user") || "{}")
-        apiKey = user.api_key || null
+        key = user.api_key || null
       } catch {}
     }
   }
-  if (!apiKey) apiKey = GUEST_API_KEY
+  return key ?? GUEST_API_KEY
+}
 
+function authHeaders(): Record<string, string> {
+  return { Authorization: `Bearer ${getApiKey()}` }
+}
+
+async function fetchApi<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      ...authHeaders(),
     },
     body: JSON.stringify(body),
   })
@@ -236,7 +242,7 @@ export default function ImageryModal({
           if (pollRef.current) clearInterval(pollRef.current)
           pollRef.current = setInterval(async () => {
             try {
-              const resp = await fetch(`/api/imagery/fetch/status/${res.job_hash}`)
+              const resp = await fetch(`/api/imagery/fetch/status/${res.job_hash}`, { headers: authHeaders() })
               if (!resp.ok) {
                 if (resp.status === 404) return
                 throw new Error(resp.statusText)
@@ -266,7 +272,7 @@ export default function ImageryModal({
           if (pollRef.current) clearInterval(pollRef.current)
           pollRef.current = setInterval(async () => {
             try {
-              const resp = await fetch(`/api/imagery/fetch/status/${res.job_hash}`)
+              const resp = await fetch(`/api/imagery/fetch/status/${res.job_hash}`, { headers: authHeaders() })
               if (!resp.ok) {
                 if (resp.status === 404) return
                 throw new Error(resp.statusText)

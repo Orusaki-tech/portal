@@ -1,6 +1,7 @@
 import type { NextConfig } from "next"
 
 const API_URL = process.env.API_URL || "http://localhost:8000"
+const TITILER_URL = process.env.TITILER_URL || "https://realitysync-titiler-36pbu2hrsq-uc.a.run.app"
 
 const nextConfig: NextConfig = {
   output: process.env.NODE_ENV === "production" ? "standalone" : undefined,
@@ -40,7 +41,7 @@ const nextConfig: NextConfig = {
       },
       {
         source: "/cog/:path*",
-        destination: "https://realitysync-titiler-111963419931.us-east1.run.app/cog/:path*",
+        destination: `${TITILER_URL}/cog/:path*`,
       },
     ]
   },
