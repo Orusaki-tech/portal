@@ -288,18 +288,20 @@ def get_band_url(item, band):
     asset = item.assets.get(band)
     return asset.href if asset else None
 
-def read_band_clipped(band_url, geojson_geom, out_shape=None):
-    # Sign the URL just-in-time so the SAS token is fresh
+def read_band_clipped(band_url, geojson_geom, target_shape=None):
     try:
         band_url = sign_url(band_url)
     except Exception:
         pass
     with Reader(band_url) as reader:
-        img = reader.feature(geojson_geom, out_shape=out_shape)
-        band_data = img.data[0]
-        return band_data, img.mask
+        img = reader.feature(geojson_geom)
+        data, mask = img.data[0], img.mask
+    if target_shape and data.shape != target_shape:
+        data = resize(data, target_shape, preserve_range=True, anti_aliasing=True)
+        mask = resize(mask.astype(float), target_shape, preserve_range=True, anti_aliasing=True) > 0.5
+    return data, mask
 
-def read_msi_stack(item, geojson_geom, target_shape=None):
+def read_msi_stack(item, geojson_geom, target_shape=(500, 500)):
     bands = {}
     first_shape = None
     for bk in BAND_KEYS:
@@ -307,9 +309,8 @@ def read_msi_stack(item, geojson_geom, target_shape=None):
         if not url:
             print(f"  WARNING: Band {bk} not available")
             continue
-        oh = target_shape
         try:
-            data, mask = read_band_clipped(url, geojson_geom, out_shape=oh)
+            data, mask = read_band_clipped(url, geojson_geom, target_shape=target_shape)
             data = np.where(mask == 0, np.nan, data)
             bands[bk] = data
             if first_shape is None:
