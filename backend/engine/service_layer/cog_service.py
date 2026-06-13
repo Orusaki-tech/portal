@@ -19,7 +19,6 @@ import logging
 import os
 import subprocess
 import tempfile
-import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -912,27 +911,21 @@ def submit_cog_job(
     return job_hash
 
 
-def _run_cog_in_process(job_hash: str, args: dict) -> None:
-    """Run COG generation in the current process (fallback path)."""
-    def run():
-        try:
-            logger.info("COG generation started (in-process): job_hash=%s", job_hash)
-            result = _generate_clipped_cog_sync(**args)
-            _write_gcs_json(PRODUCTION_BUCKET, _job_status_path(job_hash), {
-                "status": "ready", **result,
-            })
-            logger.info("COG generation complete: job_hash=%s", job_hash)
-        except Exception as e:
-            logger.exception("COG generation failed: job_hash=%s", job_hash)
-            try:
-                _write_gcs_json(PRODUCTION_BUCKET, _job_status_path(job_hash), {
-                    "status": "error", "error": str(e),
-                })
-            except Exception:
-                pass
+def _run_cog_in_process(job_hash: str, args: dict) -> str:
+    """Fallback when Cloud Run Job submission fails.
 
-    thread = threading.Thread(target=run, daemon=True)
-    thread.start()
+    Writes an error status to GCS immediately so the frontend does not spin
+    forever.  The in-process path is unreliable on Cloud Run (CPU throttled
+    after the HTTP response), so we surface the failure to the user instead.
+    """
+    logger.error("In-process fallback triggered for job_hash=%s — writing error status", job_hash)
+    try:
+        _write_gcs_json(PRODUCTION_BUCKET, _job_status_path(job_hash), {
+            "status": "error",
+            "error": "Cloud Run Job submission failed and in-process fallback is unavailable. Please retry.",
+        })
+    except Exception:
+        logger.exception("Failed to write error status for job_hash=%s", job_hash)
     return job_hash
 
 # Keep old function name for backward compat — it now delegates to the new

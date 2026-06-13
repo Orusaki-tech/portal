@@ -12,19 +12,21 @@ _REGION = os.getenv("REGION", "us-central1")
 _JOB_NAME = os.getenv("COG_JOB_NAME", "realitysync-cog-worker")
 
 
-def _get_id_token(audience: str) -> str:
+def _get_access_token() -> str:
+    """Fetch an OAuth2 access token from the metadata server."""
     req = urllib.request.Request(
-        f"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={audience}"
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+        "?scopes=https://www.googleapis.com/auth/cloud-platform"
     )
     req.add_header("Metadata-Flavor", "Google")
     with urllib.request.urlopen(req, timeout=5) as resp:
-        return resp.read().decode()
+        payload = json.loads(resp.read())
+    return payload["access_token"]
 
 
 def submit_cog_job(args: dict) -> str:
     """Submit a Cloud Run Job execution and return the execution name."""
-    audience = "https://run.googleapis.com"
-    token = _get_id_token(audience)
+    token = _get_access_token()
     name = f"projects/{_PROJECT_ID}/locations/{_REGION}/jobs/{_JOB_NAME}"
     url = f"https://{_REGION}-run.googleapis.com/v2/{name}:run"
 

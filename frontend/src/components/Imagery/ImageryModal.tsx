@@ -126,6 +126,12 @@ export default function ImageryModal({
   const mapRef = useRef<maplibregl.Map | null>(null)
   const mapReady = useRef(false)
 
+  const resizeMap = useCallback(() => {
+    const m = mapRef.current
+    if (!m || !mapReady.current) return
+    requestAnimationFrame(() => m.resize())
+  }, [])
+
   const allSources = [selectedSource, ...userSources.filter((s) => s.id !== selectedSource.id)]
   const activeSource = allSources.find((s) => s.id === activeSourceId) || selectedSource
   const isCommercial = ["planet", "maxar", "airbus", "blacksky"].includes(activeSource.id)
@@ -411,8 +417,11 @@ export default function ImageryModal({
         syncLayer(m, activeTileUrl, region?.geometry ?? null)
       }
 
-      m.fitBounds([[regionBbox[0], regionBbox[1]], [regionBbox[2], regionBbox[3]]], { padding: 40 })
       mapReady.current = true
+      requestAnimationFrame(() => {
+        m.resize()
+        m.fitBounds([[regionBbox[0], regionBbox[1]], [regionBbox[2], regionBbox[3]]], { padding: 40 })
+      })
     })
 
     mapRef.current = m
@@ -439,12 +448,19 @@ export default function ImageryModal({
     syncLayer(m, activeTileUrl, region?.geometry ?? null)
   }, [activeTileUrl, syncLayer, region?.geometry])
 
-  // Resize map when layout changes (coverage loads/unloads, fetch status changes)
+  // Keep map canvas in sync with modal layout (flex sizing is async)
   useEffect(() => {
-    const m = mapRef.current
-    if (!m || !mapReady.current) return
-    requestAnimationFrame(() => m.resize())
-  }, [coverage, fetchStatus])
+    if (!open || !mapContainer.current) return
+    const container = mapContainer.current
+    const observer = new ResizeObserver(() => resizeMap())
+    observer.observe(container)
+    resizeMap()
+    return () => observer.disconnect()
+  }, [open, resizeMap])
+
+  useEffect(() => {
+    resizeMap()
+  }, [coverage, fetchStatus, activeTileUrl, resizeMap])
 
   // Update buffer outline
   useEffect(() => {
@@ -623,8 +639,8 @@ export default function ImageryModal({
         </div>
 
         {/* Map area (flex-grow) with status overlay */}
-        <div className="relative flex-1 min-h-0">
-          <div ref={mapContainer} className="h-full w-full" />
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <div ref={mapContainer} className="absolute inset-0" />
 
           {/* Status overlay (top-left of map) */}
           <div className="pointer-events-none absolute left-3 top-3 z-10">
