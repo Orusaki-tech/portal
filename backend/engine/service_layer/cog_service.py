@@ -872,6 +872,7 @@ def submit_cog_job(
     preprocessing_opts: dict[str, Any] | None = None,
 ) -> str:
     """Submit a Cloud Run Job for COG generation and return the job hash."""
+    import sys; print("DIAG: submit_cog_job ENTERED", file=sys.stderr); sys.stderr.flush()
     job_hash = _mosaic_hash(geojson, source_id, buffer_meters, date_from, date_to, max_cloud_cover)
 
     # Write "processing" status upfront so the status endpoint can immediately
