@@ -640,7 +640,7 @@ export default function ImageryModal({
 
         {/* Map area (flex-grow) with status overlay */}
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          <div ref={mapContainer} className="absolute inset-0" />
+          <div ref={mapContainer} className="h-full w-full" />
 
           {/* Status overlay (top-left of map) */}
           <div className="pointer-events-none absolute left-3 top-3 z-10">
