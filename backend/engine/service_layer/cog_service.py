@@ -25,6 +25,8 @@ from typing import Any
 from backend.engine.service_layer.preprocessing import build_pipeline as _build_pp
 
 logger = logging.getLogger(__name__)
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 from shapely.geometry import mapping, shape
 
@@ -900,13 +902,12 @@ def submit_cog_job(
         preprocessing_opts=preprocessing_opts,
     )
 
+    import sys
     try:
         execution_name = _submit_cr_job(args)
-        logger.info("COG Cloud Run Job submitted: job_hash=%s execution=%s", job_hash, execution_name)
+        print(f"TRACE: _submit_cr_job OK — execution={execution_name}", file=sys.stderr, flush=True)
     except Exception as e:
-        logger.exception("Failed to submit Cloud Run Job for job_hash=%s", job_hash)
-        # Fallback: try running in-process (same as before)
-        logger.warning("Falling back to in-process COG generation for job_hash=%s", job_hash)
+        print(f"TRACE: _submit_cr_job FAILED — {e}", file=sys.stderr, flush=True)
         _run_cog_in_process(job_hash, args)
 
     return job_hash
