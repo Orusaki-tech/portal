@@ -841,39 +841,27 @@ def _generate_clipped_cog(
 
 
 # ---------------------------------------------------------------------------
-# Background Job Tracking
+# Background Job Tracking (backed by GCS index file for reliability across
+# deploys / cold starts / multiple instances)
 # ---------------------------------------------------------------------------
 
-_running_jobs: dict[str, dict[str, Any]] = {}
-_jobs_lock = threading.Lock()
 
-
-def _submit_job(job_hash: str) -> None:
-    with _jobs_lock:
-        _running_jobs[job_hash] = {"status": "processing"}
-
-
-def _complete_job(job_hash: str, result: dict) -> None:
-    with _jobs_lock:
-        _running_jobs[job_hash] = {"status": "ready", "result": result}
-
-
-def _fail_job(job_hash: str, error: str) -> None:
-    with _jobs_lock:
-        _running_jobs[job_hash] = {"status": "error", "error": error}
+def _job_status_path(job_hash: str) -> str:
+    return f"cogs-status/{job_hash}.json"
 
 
 def get_job_status(job_hash: str) -> dict[str, Any] | None:
-    with _jobs_lock:
-        return _running_jobs.get(job_hash)
+    """Return job status from GCS status file, resilient across deploys/instances."""
+    try:
+        status = _read_gcs_json(PRODUCTION_BUCKET, _job_status_path(job_hash))
+        if status:
+            return status
+    except Exception:
+        pass
+    return None
 
 
-# ---------------------------------------------------------------------------
-# Phase 2 — Background Clipped COG Generation
-# ---------------------------------------------------------------------------
-
-
-def generate_clipped_cog_background(
+def submit_cog_job(
     source_id: str,
     geojson: dict,
     buffer_meters: int = 0,
@@ -884,27 +872,72 @@ def generate_clipped_cog_background(
     user_id: str | None = None,
     preprocessing_opts: dict[str, Any] | None = None,
 ) -> str:
+    """Submit a Cloud Run Job for COG generation and return the job hash."""
     job_hash = _mosaic_hash(geojson, source_id, buffer_meters, date_from, date_to, max_cloud_cover)
 
+    # Write "processing" status upfront so the status endpoint can immediately
+    # find it even if the Cloud Run Job hasn't started yet.
+    try:
+        _write_gcs_json(PRODUCTION_BUCKET, _job_status_path(job_hash), {
+            "status": "processing",
+            "source_id": source_id,
+            "hash": job_hash,
+        })
+    except Exception:
+        logger.exception("Failed to write initial job status to GCS")
+
+    from backend.engine.service_layer.cloud_run_client import submit_cog_job as _submit_cr_job
+
+    args = dict(
+        source_id=source_id,
+        geojson=geojson,
+        buffer_meters=buffer_meters,
+        date_from=date_from,
+        date_to=date_to,
+        max_cloud_cover=max_cloud_cover,
+        api_key=api_key,
+        user_id=user_id,
+        preprocessing_opts=preprocessing_opts,
+    )
+
+    try:
+        execution_name = _submit_cr_job(args)
+        logger.info("COG Cloud Run Job submitted: job_hash=%s execution=%s", job_hash, execution_name)
+    except Exception as e:
+        logger.exception("Failed to submit Cloud Run Job for job_hash=%s", job_hash)
+        # Fallback: try running in-process (same as before)
+        logger.warning("Falling back to in-process COG generation for job_hash=%s", job_hash)
+        _run_cog_in_process(job_hash, args)
+
+    return job_hash
+
+
+def _run_cog_in_process(job_hash: str, args: dict) -> None:
+    """Run COG generation in the current process (fallback path)."""
     def run():
         try:
-            logger.info("COG generation started: job_hash=%s source_id=%s scenes=%s", job_hash, source_id, date_from)
-            result = _generate_clipped_cog_sync(
-                source_id, geojson, buffer_meters,
-                date_from, date_to, max_cloud_cover,
-                api_key, user_id,
-                preprocessing_opts=preprocessing_opts,
-            )
-            _complete_job(job_hash, result)
+            logger.info("COG generation started (in-process): job_hash=%s", job_hash)
+            result = _generate_clipped_cog_sync(**args)
+            _write_gcs_json(PRODUCTION_BUCKET, _job_status_path(job_hash), {
+                "status": "ready", **result,
+            })
             logger.info("COG generation complete: job_hash=%s", job_hash)
         except Exception as e:
             logger.exception("COG generation failed: job_hash=%s", job_hash)
-            _fail_job(job_hash, str(e))
+            try:
+                _write_gcs_json(PRODUCTION_BUCKET, _job_status_path(job_hash), {
+                    "status": "error", "error": str(e),
+                })
+            except Exception:
+                pass
 
-    _submit_job(job_hash)
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
     return job_hash
+
+# Keep old function name for backward compat — it now delegates to the new
+# Cloud Run Job path.
+generate_clipped_cog_background = submit_cog_job
 
 
 def _generate_clipped_cog_sync(
