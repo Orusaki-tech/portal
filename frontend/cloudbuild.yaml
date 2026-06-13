@@ -3,7 +3,8 @@ steps:
     args:
       - build
       - --tag=us-central1-docker.pkg.dev/$PROJECT_ID/realitysync/frontend:latest
-      - --build-arg=API_URL=https://realitysync-api-36pbu2hrsq-ue.a.run.app
+      - --build-arg=API_URL=https://realitysync-api-36pbu2hrsq-uc.a.run.app
+      - --build-arg=NEXT_PUBLIC_API_URL=https://realitysync-api-36pbu2hrsq-uc.a.run.app
       - .
 images:
   - us-central1-docker.pkg.dev/$PROJECT_ID/realitysync/frontend:latest
