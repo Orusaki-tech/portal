@@ -44,14 +44,14 @@ export default function RootLayout({
             <Link href="/" className="text-xl font-bold text-blue-700">
               RealitySync
             </Link>
-            <nav className="flex gap-6 text-sm font-medium">
-              <Link href="/" className="hover:text-blue-600">Map</Link>
-              <Link href="/upload" className="hover:text-blue-600">Upload</Link>
-              <Link href="/dashboard" className="hover:text-blue-600">Triage</Link>
-              <Link href="/initiatives" className="hover:text-blue-600">Initiatives</Link>
-              <Link href="/marketplace" className="hover:text-blue-600">Marketplace</Link>
-              <Link href="/exports" className="hover:text-blue-600">Exports</Link>
-              <Link href="/credits" className="hover:text-blue-600">Credits</Link>
+            <nav className="flex flex-wrap gap-x-5 gap-y-1 text-sm font-medium">
+              <Link href="/" className="hover:text-blue-600 whitespace-nowrap">Map</Link>
+              <Link href="/upload" className="hover:text-blue-600 whitespace-nowrap">Upload</Link>
+              <Link href="/dashboard" className="hover:text-blue-600 whitespace-nowrap">Triage</Link>
+              <Link href="/initiatives" className="hover:text-blue-600 whitespace-nowrap">Initiatives</Link>
+              <Link href="/marketplace" className="hover:text-blue-600 whitespace-nowrap">Marketplace</Link>
+              <Link href="/exports" className="hover:text-blue-600 whitespace-nowrap">Exports</Link>
+              <Link href="/credits" className="hover:text-blue-600 whitespace-nowrap">Credits</Link>
             </nav>
             <AuthStatus />
           </div>

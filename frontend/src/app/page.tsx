@@ -408,8 +408,8 @@ function HomePageInner() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-60px)]">
-      <div className="flex-1">
+    <div className="flex h-[calc(100vh-60px)] overflow-hidden">
+      <div className="flex-1 min-w-0 overflow-hidden">
         {adminLoading ? (
           <div className="flex h-full items-center justify-center text-gray-500">
             Loading boundaries...
